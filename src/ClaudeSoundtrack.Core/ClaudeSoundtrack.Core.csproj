@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- CD-DA ripping: drive access, TOC, offset correction, AccurateRip CRCs. -->
+    <PackageReference Include="FoxRedbook" Version="1.0.0-alpha.3" />
+    <!-- Managed FLAC encoder (netstandard2.0), so there are no native binaries to ship. -->
+    <PackageReference Include="CUETools.Codecs" Version="1.0.2" />
+    <PackageReference Include="CUETools.Codecs.Flake" Version="1.0.5" />
+    <!-- Vorbis comment tagging and embedded artwork. -->
+    <PackageReference Include="z440.atl.core" Version="7.16.0" />
+  </ItemGroup>
+
+</Project>
