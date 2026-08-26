@@ -1,0 +1,141 @@
+<Window x:Class="ClaudeSoundtrack.App.Dialogs.ArtworkSelectionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Confirm cover art"
+        Height="700" Width="960"
+        MinHeight="560" MinWidth="760"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WorkshopBrush}"
+        FontFamily="{StaticResource BodyFont}">
+
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Style="{StaticResource RivetedPanel}" Padding="20,14">
+            <StackPanel>
+                <TextBlock Text="Confirm cover art" Style="{StaticResource PanelTitleText}" />
+                <TextBlock x:Name="SubtitleText" Style="{StaticResource DimText}" Margin="0,4,0,0" />
+            </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="1" Margin="0,16,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="330" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- The candidates found, largest first. -->
+            <Border Grid.Column="0" Style="{StaticResource RivetedPanel}" Padding="6">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ListBox x:Name="CandidateList"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             SelectionChanged="CandidateList_SelectionChanged">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="Margin" Value="4" />
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListBoxItem">
+                                            <Border x:Name="Card"
+                                                    Background="{StaticResource SteelBrush}"
+                                                    BorderBrush="{StaticResource BrassDarkBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="3"
+                                                    Padding="9">
+                                                <ContentPresenter />
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="Card" Property="BorderBrush" Value="{StaticResource BrassBrush}" />
+                                                </Trigger>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter TargetName="Card" Property="BorderBrush" Value="{StaticResource AmberBrush}" />
+                                                    <Setter TargetName="Card" Property="Background" Value="#3A2E14" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0"
+                                            BorderBrush="{StaticResource BrassDarkBrush}"
+                                            BorderThickness="1">
+                                        <Image Source="{Binding Thumbnail}" Width="66" Height="66" Stretch="UniformToFill" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Margin="11,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Source}"
+                                                   FontFamily="{StaticResource ReadoutFont}"
+                                                   FontSize="12"
+                                                   Foreground="{StaticResource AmberBrush}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding Resolution}"
+                                                   FontSize="12"
+                                                   Foreground="{StaticResource ParchmentBrush}"
+                                                   Margin="0,3,0,0" />
+                                        <TextBlock Text="{Binding Quality}"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource ParchmentDimBrush}"
+                                                   Margin="0,2,0,0"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </ScrollViewer>
+            </Border>
+
+            <!-- Full-size preview, because a thumbnail hides a wrong edition. -->
+            <Border Grid.Column="1" Style="{StaticResource RivetedPanel}" Margin="16,0,0,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Style="{StaticResource RecessedPanel}">
+                        <Image x:Name="PreviewImage" Stretch="Uniform" Margin="8" />
+                    </Border>
+
+                    <Border Grid.Row="1" Style="{StaticResource RecessedPanel}" Margin="0,12,0,0" Padding="14,10">
+                        <StackPanel>
+                            <TextBlock x:Name="DetailSourceText" Style="{StaticResource ReadoutText}" Text="" />
+                            <TextBlock x:Name="DetailReleaseText" Style="{StaticResource BodyText}" Margin="0,6,0,0" />
+                            <TextBlock x:Name="DetailQualityText" Style="{StaticResource DimText}" Margin="0,4,0,0" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Grid Grid.Row="2" Margin="0,16,0,0">
+            <TextBlock Style="{StaticResource DimText}" VerticalAlignment="Center"
+                       Text="Rejecting closes this window so you can save the correct cover and choose the file yourself." />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="RejectButton" Content="None of These"
+                        Style="{StaticResource BrassButton}" Margin="0,0,10,0"
+                        Click="RejectButton_Click" />
+                <Button x:Name="AcceptButton" Content="Use This Cover"
+                        Style="{StaticResource AmberButton}"
+                        IsEnabled="False"
+                        Click="AcceptButton_Click" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
