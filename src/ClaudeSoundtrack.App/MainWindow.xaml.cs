@@ -72,6 +72,12 @@ public partial class MainWindow : PanelWindow
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
 
+    private void LibraryButton_Click(object sender, RoutedEventArgs e)
+    {
+        var library = new LibraryWindow(_settings) { Owner = this };
+        library.ShowDialog();
+    }
+
     private void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new SettingsWindow(_settings) { Owner = this };
