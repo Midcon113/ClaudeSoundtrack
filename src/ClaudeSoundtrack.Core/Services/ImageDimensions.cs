@@ -13,6 +13,57 @@ namespace ClaudeSoundtrack.Core.Services;
 /// </summary>
 public static class ImageDimensions
 {
+    /// <summary>Image formats this can recognise from a header.</summary>
+    public enum Format
+    {
+        Unknown,
+        Jpeg,
+        Png,
+        Gif,
+        Bmp,
+        WebP
+    }
+
+    /// <summary>
+    /// Identifies an image format from its magic bytes.
+    ///
+    /// Used to decide whether cover art needs converting before it is embedded:
+    /// a FLAC picture block may declare any MIME type, but the things that read
+    /// it - YouTube Music included - generally only handle JPEG and PNG.
+    /// </summary>
+    public static Format DetectFormat(ReadOnlySpan<byte> data)
+    {
+        if (data.Length < 16) return Format.Unknown;
+
+        if (IsPng(data)) return Format.Png;
+        if (IsGif(data)) return Format.Gif;
+        if (IsBmp(data)) return Format.Bmp;
+        if (IsWebp(data)) return Format.WebP;
+        if (IsJpeg(data)) return Format.Jpeg;
+
+        return Format.Unknown;
+    }
+
+    /// <summary>The MIME type to declare for a format in a FLAC picture block.</summary>
+    public static string MimeTypeFor(Format format) => format switch
+    {
+        Format.Jpeg => "image/jpeg",
+        Format.Png => "image/png",
+        Format.Gif => "image/gif",
+        Format.Bmp => "image/bmp",
+        Format.WebP => "image/webp",
+        _ => "application/octet-stream"
+    };
+
+    /// <summary>
+    /// Whether players can be relied on to display this format from a tag.
+    ///
+    /// JPEG and PNG only. WebP embeds happily and then simply does not appear,
+    /// which is worse than being rejected outright.
+    /// </summary>
+    public static bool IsWidelySupported(Format format) =>
+        format is Format.Jpeg or Format.Png;
+
     /// <summary>
     /// Returns the pixel size of an encoded image, or null if the format is not
     /// recognised or the header is truncated.

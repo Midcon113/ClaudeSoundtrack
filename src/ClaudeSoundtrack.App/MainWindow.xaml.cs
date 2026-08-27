@@ -1015,6 +1015,15 @@ public partial class MainWindow : PanelWindow
     /// <summary>Shows the chosen art and arms the Apply button.</summary>
     private void SetPendingArtwork(ArtworkCandidate candidate)
     {
+        // Convert here, before it is ever embedded, so the preview, the recorded
+        // resolution and the bytes written to the files are all the same thing.
+        // A WebP cover embeds happily and then never appears in YouTube Music.
+        var normalised = ArtworkNormaliser.Normalise(candidate.ImageData!);
+
+        candidate.ImageData = normalised.Data;
+        if (normalised.Width > 0) candidate.Width = normalised.Width;
+        if (normalised.Height > 0) candidate.Height = normalised.Height;
+
         _pendingArtwork = candidate;
 
         ArtworkIdlePanel.Visibility = Visibility.Collapsed;
@@ -1034,7 +1043,23 @@ public partial class MainWindow : PanelWindow
         };
 
         ApplyArtworkButton.IsEnabled = true;
-        SetStatus($"Artwork selected from {candidate.Source} ({candidate.ResolutionText}).");
+
+        if (normalised.Problem is not null)
+        {
+            ArtworkQualityText.Text = normalised.Problem;
+            SetStatus("Artwork selected, but it is in a format YouTube Music will not display.");
+            MessageBox.Show(this, normalised.Problem,
+                "ClaudeSoundtrack", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        else if (normalised.WasConverted)
+        {
+            SetStatus($"Artwork selected from {candidate.Source} ({candidate.ResolutionText}), " +
+                      "converted to JPEG so YouTube Music will display it.");
+        }
+        else
+        {
+            SetStatus($"Artwork selected from {candidate.Source} ({candidate.ResolutionText}).");
+        }
     }
 
     /// <summary>

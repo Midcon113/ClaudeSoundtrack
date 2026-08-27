@@ -112,6 +112,17 @@ public sealed class ReadinessChecker
                     issues.Add(new(ReadinessSeverity.Warning,
                         $"Cover art is not square ({project.CoverArtWidth}x{project.CoverArtHeight}); it will be cropped.", null));
             }
+
+            // A picture block may declare any MIME type, but YouTube Music only
+            // renders JPEG and PNG. Anything else embeds cleanly, uploads, and
+            // then just is not there - with nothing anywhere saying why.
+            var format = ImageDimensions.DetectFormat(project.CoverArt);
+            if (!ImageDimensions.IsWidelySupported(format))
+            {
+                issues.Add(new(ReadinessSeverity.Error,
+                    $"Cover art is {(format == ImageDimensions.Format.Unknown ? "in an unrecognised format" : format.ToString().ToUpperInvariant())}. " +
+                    "YouTube Music only displays JPEG and PNG - re-select the artwork so it can be converted.", null));
+            }
         }
 
         // Flattening must have produced a contiguous 1..N run. A gap or a repeat
