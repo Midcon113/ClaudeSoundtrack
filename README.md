@@ -8,6 +8,8 @@ Expanded and complete-score releases are the awkward case. They arrive as two, t
 
 ![ClaudeSoundtrack](docs/screenshot.png)
 
+![Library](docs/library.png)
+
 ## What it does
 
 - **Rips CD audio to FLAC** with drive read-offset correction, re-reads on damaged sectors, and AccurateRip checksums. Audio goes straight from the disc into the encoder — no intermediate WAV.
@@ -15,7 +17,9 @@ Expanded and complete-score releases are the awkward case. They arrive as two, t
 - **Leaves track numbers out of file names.** `01 - Main Titles.flac` becomes `Main Titles.flac`; the number lives in the `TRACKNUMBER` tag where it belongs. Titles that legitimately begin with a number — *2001: A Space Odyssey*, *633 Squadron* — are left alone.
 - **Identifies the release and verifies it against the disc.** A MusicBrainz disc-ID hit is an exact fingerprint of the pressing. Discogs covers the limited runs MusicBrainz lacks, but every Discogs match is checked against the disc's own table of contents before it is trusted — otherwise a search for an expanded edition happily returns the original album of the same name.
 - **Hunts for high-resolution cover art** across iTunes, the Cover Art Archive and Discogs, and always asks you to confirm before writing it. If nothing found is right, save the cover yourself and pick the file.
-- **Verifies the album before you upload.** Every file is re-read from disk and checked for the things YouTube Music actually needs. If it passes, the album folder opens ready for dragging. If it does not, a track-by-track tag editor opens instead.
+- **Verifies the album before you upload.** Every file is re-read from disk and checked for the things YouTube Music actually needs — including whether the audio is actually *there*, since a failed rip can produce full-length files containing nothing but silence. If it does not pass, a track-by-track tag editor opens instead.
+- **Catches the browser's upload dialog** and fills in every track, so uploading is one press of Open rather than navigating a file picker by hand.
+- **Browses and plays what you have already ripped**, so a finished album can be checked without leaving the app.
 
 Finished albums land in `C:\Users\<you>\Music\<Artist> - <Album> (<Year>)\`.
 
@@ -83,6 +87,10 @@ A few decisions are worth knowing about before changing anything:
 ## Interface
 
 The look is drawn from oxidised steel control panels with brass fittings and amber lamps. The convention is consistent and worth preserving: brass is structure, amber means active, green means done, and red is reserved for genuine faults.
+
+There is no Windows title bar — the header plate is the caption strip, using `WindowChrome` so dragging, resizing and Aero Snap all still behave normally.
+
+A bank of lamps sweeps across the header while a rip is running; a forty-minute job needs something that reads as alive from across the room. Glow strength, animation and speed are all in Settings, previewed live while you drag the slider.
 
 ## Licence
 
