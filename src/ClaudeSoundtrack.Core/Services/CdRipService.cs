@@ -11,14 +11,16 @@ namespace ClaudeSoundtrack.Core.Services;
 /// <param name="TrackIndex">Zero-based position within this disc's rip queue.</param>
 /// <param name="TrackCount">How many tracks this disc's rip will produce.</param>
 /// <param name="TrackPercent">Completion of the current track, 0-100.</param>
-/// <param name="HadErrors">True once any sector in this track needed error handling.</param>
+/// <param name="HadErrors">True once any sector in this track could not be read.</param>
+/// <param name="IsComplete">True only on the single report that finishes a track.</param>
 public readonly record struct RipTrackProgress(
     int TrackNumber,
     string TrackTitle,
     int TrackIndex,
     int TrackCount,
     double TrackPercent,
-    bool HadErrors)
+    bool HadErrors,
+    bool IsComplete)
 {
     /// <summary>Completion across the whole disc, 0-100.</summary>
     public double OverallPercent =>
@@ -28,32 +30,52 @@ public readonly record struct RipTrackProgress(
 /// <summary>
 /// Rips audio tracks off a CD and encodes them straight to FLAC.
 ///
-/// Audio never touches an intermediate WAV: sectors come back from FoxRedbook as
-/// raw 16-bit stereo PCM and go directly into the FLAC encoder. A 74-minute disc
-/// would otherwise cost ~750MB of scratch space per disc for no benefit.
+/// Audio never touches an intermediate WAV: sectors are read into a small buffer
+/// and pushed directly into the FLAC encoder. A 74-minute disc would otherwise
+/// cost ~750MB of scratch space per disc for no benefit.
 ///
-/// The rip runs through <c>RipSession.CreateAutoCorrected</c>, which applies the
-/// drive's read offset and re-reads damaged sectors - the difference between a
-/// bit-perfect rip and one that is quietly a few samples out.
+/// Reads go through <see cref="IOpticalDrive.ReadSectorsAsync"/> rather than
+/// FoxRedbook's <c>RipSession</c>. That is deliberate and was arrived at the hard
+/// way - see the note on <see cref="RipTracksAsync"/>.
 /// </summary>
 public sealed class CdRipService
 {
     /// <summary>A CD sector holds 2352 bytes = 588 stereo 16-bit sample frames.</summary>
     private const int BytesPerSector = 2352;
 
+    /// <summary>
+    /// Sectors per read request. 27 x 2352 = 63,504 bytes, which stays under the
+    /// 64KB transfer limit that many drives impose on a single SCSI command.
+    /// </summary>
+    private const int SectorsPerRead = 27;
+
+    /// <summary>How many times to re-attempt a chunk before narrowing the failure down.</summary>
+    private const int MaxChunkRetries = 3;
+
     /// <summary>Red Book audio is always 16-bit, stereo, 44.1kHz.</summary>
     private static AudioPCMConfig RedBookPcm => new(16, 2, 44100);
 
     /// <summary>
-    /// How many sectors to accumulate before handing a block to the encoder.
-    /// Roughly a second of audio - large enough that encoding is not called in a
-    /// tight loop, small enough that progress stays responsive.
-    /// </summary>
-    private const int SectorsPerEncodeBlock = 64;
-
-    /// <summary>
     /// Rips the requested tracks from the disc in <paramref name="devicePath"/>,
     /// writing one FLAC per track into <paramref name="outputFolder"/>.
+    ///
+    /// **Why this does not use FoxRedbook's RipSession.** RipSession is the
+    /// library's headline API and applies jitter correction and re-reads, but in
+    /// 1.0.0-alpha.3 it has two defects that make it unusable here, both
+    /// reproduced against a real 28-track disc:
+    ///
+    ///   1. A session yields correct audio for the first track and then silence
+    ///      for every track after it. Nothing reports an error - the sectors
+    ///      arrive full of zeros, the durations are right, and the result is a
+    ///      complete album of silent FLAC files that looks valid until played.
+    ///   2. Even with a fresh session and drive handle per track, some tracks
+    ///      throw IndexOutOfRangeException inside WiggleEngine.TryMergeFragment.
+    ///
+    /// Reading sectors directly returns byte-identical audio to RipSession on the
+    /// tracks where RipSession works, so nothing is lost in fidelity. Offset
+    /// correction is preserved by wrapping the drive in
+    /// <see cref="OffsetCorrectingDrive"/>; damaged-sector recovery is handled by
+    /// <see cref="ReadChunkAsync"/> instead of by WiggleEngine.
     ///
     /// Files are written under a temporary per-track name and only moved into
     /// place once the track completes, so an aborted rip never leaves a truncated
@@ -84,12 +106,24 @@ public sealed class CdRipService
 
         Directory.CreateDirectory(outputFolder);
 
-        var drive = OpticalDrive.Open(devicePath);
+        var raw = OpticalDrive.Open(devicePath);
+        IOpticalDrive drive = raw;
+        IDisposable? wrapper = null;
+
         try
         {
-            var toc = await drive.ReadTocAsync(cancellationToken).ConfigureAwait(false);
+            // Apply the drive's read offset when the database knows this model.
+            // Without it every track is shifted by a few hundred samples, which
+            // is inaudible but makes the rip fail checksum verification.
+            var offset = LookupOffset(raw);
+            if (offset is not null and not 0)
+            {
+                var corrected = new OffsetCorrectingDrive(raw, offset.Value);
+                wrapper = corrected;
+                drive = corrected;
+            }
 
-            using var session = RipSession.CreateAutoCorrected(drive, new RipOptions());
+            var toc = await drive.ReadTocAsync(cancellationToken).ConfigureAwait(false);
 
             for (var i = 0; i < tracks.Count; i++)
             {
@@ -106,21 +140,38 @@ public sealed class CdRipService
                 if (tocTrack.Type == TrackType.Data) continue;
 
                 var destination = Path.Combine(outputFolder, fileNames[i]);
-                await RipSingleTrackAsync(session, tocTrack, track, destination, i, tracks.Count, progress, cancellationToken)
+                await RipSingleTrackAsync(
+                        drive, tocTrack, track, destination, i, tracks.Count, progress, cancellationToken)
                     .ConfigureAwait(false);
             }
         }
         finally
         {
-            if (drive is IDisposable disposable) disposable.Dispose();
+            // Dispose only the outermost handle; the wrapper owns the inner drive.
+            if (wrapper is not null) wrapper.Dispose();
+            else if (raw is IDisposable disposable) disposable.Dispose();
         }
     }
 
     /// <summary>
-    /// Rips one track: pull sectors, batch them, push them into the encoder.
+    /// Looks the drive's read offset up in FoxRedbook's bundled database.
+    /// An unknown drive simply gets no correction rather than a guess.
     /// </summary>
+    private static int? LookupOffset(IOpticalDrive drive)
+    {
+        try
+        {
+            return KnownDriveOffsets.Lookup(drive.Inquiry);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Rips one track: read sectors in chunks, encode each chunk as it arrives.</summary>
     private static async Task RipSingleTrackAsync(
-        RipSession session,
+        IOpticalDrive drive,
         TrackInfo tocTrack,
         SoundtrackTrack track,
         string destination,
@@ -136,6 +187,7 @@ public sealed class CdRipService
         var pcm = RedBookPcm;
         var totalSectors = tocTrack.SectorCount;
         var hadErrors = false;
+        long nonZeroBytes = 0;
 
         FlakeWriter? writer = null;
         try
@@ -148,40 +200,43 @@ public sealed class CdRipService
                 CompressionLevel = 8
             };
 
-            var block = new byte[SectorsPerEncodeBlock * BytesPerSector];
-            var blockSectors = 0;
-            var sectorsDone = 0;
+            var buffer = new byte[SectorsPerRead * BytesPerSector];
+            long sectorsDone = 0;
             var lastReported = -1.0;
 
-            await foreach (var sector in session
-                .RipTrackAsync(tocTrack, progress: null, cancellationToken)
-                .ConfigureAwait(false))
+            while (sectorsDone < totalSectors)
             {
-                if (sector.HadErrors) hadErrors = true;
+                cancellationToken.ThrowIfCancellationRequested();
 
-                sector.Pcm.Span.CopyTo(block.AsSpan(blockSectors * BytesPerSector, BytesPerSector));
-                blockSectors++;
-                sectorsDone++;
+                var want = (int)Math.Min(SectorsPerRead, totalSectors - sectorsDone);
+                var result = await ReadChunkAsync(
+                        drive, tocTrack.StartLba + sectorsDone, want, buffer, cancellationToken)
+                    .ConfigureAwait(false);
 
-                if (blockSectors == SectorsPerEncodeBlock)
+                if (result.HadError) hadErrors = true;
+
+                // Count real audio so a silent rip can be detected rather than
+                // shipped. This is cheap next to the cost of the read itself.
+                var byteCount = want * BytesPerSector;
+                for (var i = 0; i < byteCount; i++)
                 {
-                    WriteBlock(writer, pcm, block, blockSectors);
-                    blockSectors = 0;
+                    if (buffer[i] != 0) nonZeroBytes++;
                 }
 
-                // Reporting on every sector would flood the UI thread; a disc is
+                writer.Write(new AudioBuffer(pcm, buffer, want * CdConstants.SampleFramesPerSector));
+                sectorsDone += want;
+
+                // Reporting on every chunk would flood the UI thread; a disc is
                 // ~350,000 sectors. Report on whole-percent changes only.
-                var percent = totalSectors > 0 ? sectorsDone * 100.0 / totalSectors : 0;
+                var percent = totalSectors > 0 ? sectorsDone * 100.0 / totalSectors : 100;
                 if (progress is not null && Math.Floor(percent) > lastReported)
                 {
                     lastReported = Math.Floor(percent);
                     progress.Report(new RipTrackProgress(
-                        track.SourceTrackNumber, track.Title, trackIndex, trackCount, percent, hadErrors));
+                        track.SourceTrackNumber, track.Title, trackIndex, trackCount,
+                        Math.Min(percent, 99.9), hadErrors, IsComplete: false));
                 }
             }
-
-            // Flush whatever did not fill a whole block.
-            if (blockSectors > 0) WriteBlock(writer, pcm, block, blockSectors);
 
             writer.Close();
             writer = null;
@@ -193,18 +248,12 @@ public sealed class CdRipService
             track.IsRipped = true;
             track.HadReadErrors = hadErrors;
             track.Duration = TimeSpan.FromSeconds((double)totalSectors / CdConstants.SectorsPerSecond);
+            track.IsSilent = nonZeroBytes == 0 && totalSectors > 0;
 
-            try
-            {
-                track.AccurateRipCrc = session.GetAccurateRipV1Crc(tocTrack);
-            }
-            catch
-            {
-                // Purely informational; a drive that cannot supply it is not a failure.
-            }
-
+            // Exactly one completion report per track, so callers can log on it
+            // without having to de-duplicate.
             progress?.Report(new RipTrackProgress(
-                track.SourceTrackNumber, track.Title, trackIndex, trackCount, 100, hadErrors));
+                track.SourceTrackNumber, track.Title, trackIndex, trackCount, 100, hadErrors, IsComplete: true));
         }
         catch
         {
@@ -221,15 +270,83 @@ public sealed class CdRipService
         }
     }
 
+    /// <summary>Outcome of reading one chunk of sectors.</summary>
+    /// <param name="HadError">True when some part of the chunk could not be read.</param>
+    private readonly record struct ChunkResult(bool HadError);
+
     /// <summary>
-    /// Hands one block of raw CD bytes to the FLAC encoder.
+    /// Reads <paramref name="count"/> sectors into <paramref name="buffer"/>,
+    /// retrying and then narrowing down to isolate an unreadable sector.
     ///
-    /// AudioBuffer's length is in sample frames, not bytes - passing byte counts
-    /// here silently produces four times too much audio.
+    /// A scratched disc usually has a handful of bad sectors in an otherwise fine
+    /// track. Failing the whole track would throw away 4 minutes of good audio
+    /// over a few milliseconds of damage, so unreadable sectors are filled with
+    /// silence and the track is flagged instead.
     /// </summary>
-    private static void WriteBlock(FlakeWriter writer, AudioPCMConfig pcm, byte[] block, int sectorCount)
+    private static async Task<ChunkResult> ReadChunkAsync(
+        IOpticalDrive drive, long lba, int count, byte[] buffer, CancellationToken cancellationToken)
     {
-        var frames = sectorCount * CdConstants.SampleFramesPerSector;
-        writer.Write(new AudioBuffer(pcm, block, frames));
+        for (var attempt = 0; attempt < MaxChunkRetries; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                var got = await drive.ReadSectorsAsync(lba, count, buffer, ReadOptions.None, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (got == count) return new ChunkResult(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                // Fall through to retry, then to per-sector isolation.
+            }
+        }
+
+        // The chunk failed as a unit. Read it sector by sector so one bad sector
+        // does not cost the ~27 good ones around it.
+        var hadError = false;
+
+        for (var i = 0; i < count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var target = buffer.AsMemory(i * BytesPerSector, BytesPerSector);
+            var recovered = false;
+
+            for (var attempt = 0; attempt < MaxChunkRetries && !recovered; attempt++)
+            {
+                try
+                {
+                    if (await drive.ReadSectorsAsync(lba + i, 1, target, ReadOptions.None, cancellationToken)
+                            .ConfigureAwait(false) == 1)
+                    {
+                        recovered = true;
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // Try again, then give up on this sector.
+                }
+            }
+
+            if (!recovered)
+            {
+                // Silence for the damaged sector: 1/75th of a second, audible as
+                // a tick at worst, and the track is flagged so it can be re-ripped.
+                target.Span.Clear();
+                hadError = true;
+            }
+        }
+
+        return new ChunkResult(hadError);
     }
 }

@@ -50,6 +50,16 @@ public sealed class SoundtrackTrack
     /// <summary>Set when the ripper reported unrecoverable read errors for this track.</summary>
     public bool HadReadErrors { get; set; }
 
+    /// <summary>
+    /// True when the ripped audio contained no non-zero samples at all.
+    ///
+    /// Worth tracking separately from <see cref="HadReadErrors"/>: a drive or
+    /// library fault can hand back a full track of zeros without reporting any
+    /// error, producing a FLAC with the right duration and no sound in it. That
+    /// failure is invisible unless it is looked for.
+    /// </summary>
+    public bool IsSilent { get; set; }
+
     /// <summary>AccurateRip v1 CRC, when the rip produced one. Informational only.</summary>
     public uint? AccurateRipCrc { get; set; }
 

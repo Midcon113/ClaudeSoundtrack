@@ -222,7 +222,17 @@ public sealed class ReadinessChecker
             // an int, so a short stinger cue - which scores are full of - would
             // read as zero and be reported as an empty file.
             if (file.DurationMs <= 0)
+            {
                 issues.Add(new(ReadinessSeverity.Error, $"Track {n} appears to contain no audio.", n));
+            }
+            else if (track.IsSilent || IsProbablySilent(file, track.FilePath!))
+            {
+                // The dangerous failure: a full-length file with nothing in it.
+                // The duration is right, the tags are right, and it plays as
+                // silence. Caught here because it cannot be heard from the UI.
+                issues.Add(new(ReadinessSeverity.Error,
+                    $"Track {n} \"{track.Title}\" is silent - it has the right length but no audio. Re-rip this disc.", n));
+            }
 
             var extension = Path.GetExtension(track.FilePath);
             if (!string.Equals(extension, ".flac", StringComparison.OrdinalIgnoreCase))
@@ -236,5 +246,42 @@ public sealed class ReadinessChecker
         }
 
         return checkedCount;
+    }
+
+    /// <summary>
+    /// Detects a FLAC that is the right length but contains (near) silence.
+    ///
+    /// FLAC compresses digital silence to almost nothing, so the file's own
+    /// bitrate gives it away: real CD audio lands somewhere around 400-1000 kbps,
+    /// while a track of zeros comes out under 10. The threshold sits well below
+    /// anything genuine - even a very quiet ambient cue does not approach it -
+    /// so this does not fire on legitimately soft music.
+    ///
+    /// The file is checked rather than only the rip-time flag, so an album
+    /// re-opened in a later session is judged on what is actually on disk.
+    /// </summary>
+    private static bool IsProbablySilent(Track file, string path)
+    {
+        const int silentBitrateCeiling = 30; // kbps
+
+        var bitrate = (double)file.Bitrate;
+        if (bitrate is > 0 and < silentBitrateCeiling) return true;
+
+        // Bitrate is unavailable on some files; fall back to bytes per second,
+        // which measures the same thing directly.
+        if (bitrate <= 0 && file.DurationMs > 0)
+        {
+            try
+            {
+                var bytesPerSecond = new FileInfo(path).Length / (file.DurationMs / 1000.0);
+                return bytesPerSecond < silentBitrateCeiling * 125; // kbps -> bytes/s
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+        }
+
+        return false;
     }
 }

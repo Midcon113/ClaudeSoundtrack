@@ -255,3 +255,126 @@ public class PipelineIntegrationTests : IDisposable
         Assert.True(file.DurationMs > 0);
     }
 }
+
+/// <summary>
+/// Guards the worst failure this app has actually produced: a full album of
+/// correctly-tagged, correctly-timed FLAC files containing nothing but silence.
+///
+/// It happened for real - FoxRedbook's RipSession returned zeroed sectors for
+/// every track after the first, with no error reported. Everything downstream
+/// passed, because nothing was looking at whether the audio existed.
+/// </summary>
+public class SilentRipDetectionTests : IDisposable
+{
+    private readonly string _folder;
+
+    public SilentRipDetectionTests()
+    {
+        _folder = Path.Combine(Path.GetTempPath(), "ClaudeSoundtrackTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_folder);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_folder, recursive: true); } catch { /* best effort */ }
+    }
+
+    /// <summary>Writes a FLAC of the given length containing either music or pure silence.</summary>
+    private static void WriteFlac(string path, double seconds, bool silent)
+    {
+        var pcm = new AudioPCMConfig(16, 2, 44100);
+        var frames = (int)(44100 * seconds);
+        var writer = new FlakeWriter(path, pcm) { FinalSampleCount = frames, CompressionLevel = 5 };
+
+        var bytes = new byte[frames * 4];
+        if (!silent)
+        {
+            var rnd = new Random(7);
+            for (var i = 0; i < frames; i++)
+            {
+                // Noise, not a sine: a pure tone compresses almost as well as
+                // silence and would make this test prove nothing.
+                var s = (short)rnd.Next(-9000, 9000);
+                bytes[i * 4 + 0] = (byte)(s & 0xFF);
+                bytes[i * 4 + 1] = (byte)((s >> 8) & 0xFF);
+                bytes[i * 4 + 2] = bytes[i * 4 + 0];
+                bytes[i * 4 + 3] = bytes[i * 4 + 1];
+            }
+        }
+
+        writer.Write(new AudioBuffer(pcm, bytes, frames));
+        writer.Close();
+    }
+
+    private AlbumProject BuildProject(bool silent)
+    {
+        var project = new AlbumProject
+        {
+            AlbumTitle = "Test Score",
+            AlbumArtist = "Composer",
+            Year = 2018,
+            CoverArt = Convert.FromBase64String(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="),
+            CoverArtWidth = 1400,
+            CoverArtHeight = 1400,
+            OutputFolder = _folder
+        };
+
+        foreach (var (title, i) in new[] { "Main Title", "The Chase" }.Select((t, i) => (t, i)))
+        {
+            var path = Path.Combine(_folder, $"{title}.flac");
+            WriteFlac(path, 6.0, silent);
+            project.Tracks.Add(new SoundtrackTrack
+            {
+                SourceDiscNumber = 1,
+                SourceTrackNumber = i + 1,
+                Title = title,
+                Artist = "Composer",
+                FilePath = path,
+                IsRipped = true
+            });
+        }
+
+        TrackFlattener.Flatten(project);
+        new TaggingService().WriteAllTags(project);
+        return project;
+    }
+
+    [Fact]
+    public void SilentTracksAreRejectedEvenWhenEverythingElseIsCorrect()
+    {
+        var project = BuildProject(silent: true);
+
+        var report = new ReadinessChecker().Check(project);
+
+        Assert.False(report.IsReady, "A silent album must never pass the readiness check.");
+        Assert.Contains(report.Issues, i => i.Message.Contains("silent", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The other half of the guard: real audio must still pass. A silence check
+    /// that rejects everything would be just as useless.
+    /// </summary>
+    [Fact]
+    public void RealAudioStillPasses()
+    {
+        var project = BuildProject(silent: false);
+
+        var report = new ReadinessChecker().Check(project);
+
+        Assert.True(report.IsReady,
+            "Issues: " + string.Join(" | ", report.Issues.Select(i => $"{i.Severity}: {i.Message}")));
+        Assert.DoesNotContain(report.Issues, i => i.Message.Contains("silent", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void TheRipTimeSilenceFlagAloneIsEnoughToFail()
+    {
+        var project = BuildProject(silent: false);
+        project.Tracks[0].IsSilent = true;
+
+        var report = new ReadinessChecker().Check(project);
+
+        Assert.False(report.IsReady);
+    }
+}

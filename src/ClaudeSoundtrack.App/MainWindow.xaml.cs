@@ -398,7 +398,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var musicRoot = Environment.GetFolderPath(Environment.SpecialFolder.MyMusic);
+            var musicRoot = ResolveMusicFolder();
             var folderName = FileNaming.BuildAlbumFolderName(_project.AlbumTitle, _project.AlbumArtist, _project.Year);
             var path = Path.Combine(musicRoot, folderName);
 
@@ -425,6 +425,29 @@ public partial class MainWindow : Window
                 "ClaudeSoundtrack", MessageBoxButton.OK, MessageBoxImage.Error);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Finds the Music folder to write albums into.
+    ///
+    /// Deliberately prefers the real profile folder over
+    /// <see cref="Environment.SpecialFolder.MyMusic"/>. When OneDrive's Known
+    /// Folder Move is enabled, MyMusic resolves to OneDrive\Music, and a rip
+    /// silently lands in cloud storage - which then starts uploading gigabytes of
+    /// FLAC. The local folder is what people mean by "my Music folder".
+    /// </summary>
+    private static string ResolveMusicFolder()
+    {
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrEmpty(profile))
+        {
+            var local = Path.Combine(profile, "Music");
+            if (Directory.Exists(local)) return local;
+        }
+
+        // No local Music folder: fall back to whatever Windows reports, which at
+        // least always exists.
+        return Environment.GetFolderPath(Environment.SpecialFolder.MyMusic);
     }
 
     private async Task RipCurrentDiscAsync()
@@ -556,7 +579,10 @@ public partial class MainWindow : Window
         RipOverallProgress.Value = progress.OverallPercent;
         RipOverallPercent.Text = $"{progress.OverallPercent:F0}%";
 
-        if (progress.TrackPercent >= 100)
+        // Log on the single completion report, not on reaching 100 percent -
+        // progress can legitimately report 100 more than once, which previously
+        // wrote every track into the log twice.
+        if (progress.IsComplete)
         {
             AppendRipLog($"  {progress.TrackNumber:D2}  {progress.TrackTitle}" +
                          (progress.HadErrors ? "   [read errors]" : "   ok"));
