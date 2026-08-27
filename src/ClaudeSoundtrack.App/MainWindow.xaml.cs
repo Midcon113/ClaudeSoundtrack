@@ -62,6 +62,39 @@ public partial class MainWindow : PanelWindow
 
         LoadDrives();
         GoToStage(Stage.Disc);
+
+        // After the window is up, so the warning appears over a drawn panel
+        // rather than in front of nothing.
+        Loaded += (_, _) => CheckFlacMimeRegistration();
+    }
+
+    /// <summary>
+    /// Warns if Windows reports the wrong MIME type for .flac, which silently
+    /// breaks browser uploads to YouTube Music.
+    ///
+    /// Only ever shown when the registration is genuinely wrong. A warning that
+    /// greets a healthy machine teaches people to dismiss warnings.
+    /// </summary>
+    private void CheckFlacMimeRegistration()
+    {
+        if (_settings.SuppressFlacMimeCheck) return;
+
+        var report = FlacMimeCheck.Check();
+        if (!report.NeedsFixing) return;
+
+        var dialog = new FlacMimeWindow(report) { Owner = this };
+        dialog.ShowDialog();
+
+        if (dialog.WasFixed)
+        {
+            SetStatus("FLAC file type corrected. Restart Firefox for it to take effect.");
+        }
+
+        if (dialog.SuppressFutureChecks)
+        {
+            _settings.SuppressFlacMimeCheck = true;
+            _settings.Save();
+        }
     }
 
     // ================= Window furniture =================

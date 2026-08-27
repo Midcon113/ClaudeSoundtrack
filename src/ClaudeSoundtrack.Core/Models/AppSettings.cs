@@ -34,6 +34,15 @@ public sealed class AppSettings
     public double LampSpeed { get; set; } = 1.0;
 
     /// <summary>
+    /// Stop checking whether Windows reports the right MIME type for .flac.
+    ///
+    /// Set once the user has fixed it or said they do not want to be told; a
+    /// warning that keeps reappearing on a machine the user has decided about is
+    /// just noise.
+    /// </summary>
+    public bool SuppressFlacMimeCheck { get; set; }
+
+    /// <summary>
     /// Where finished albums are written. Empty means "work it out", which prefers
     /// the local profile Music folder over a OneDrive-redirected one.
     /// </summary>
