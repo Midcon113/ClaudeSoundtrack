@@ -1,5 +1,7 @@
 # ClaudeSoundtrack
 
+[![build](https://github.com/Midcon113/ClaudeSoundtrack/actions/workflows/build.yml/badge.svg)](https://github.com/Midcon113/ClaudeSoundtrack/actions/workflows/build.yml)
+
 A Windows 11 app for ripping multi-disc movie soundtracks to FLAC and preparing them for upload to YouTube Music.
 
 Expanded and complete-score releases are the awkward case. They arrive as two, three or four discs, they are limited pressings that metadata services barely cover, and YouTube Music has no concept of a disc within an album — so uploading them naively produces a jumbled mess with three "track 1"s and no cover. ClaudeSoundtrack handles that specific job end to end.
