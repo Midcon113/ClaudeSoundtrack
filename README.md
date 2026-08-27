@@ -20,6 +20,7 @@ Expanded and complete-score releases are the awkward case. They arrive as two, t
 - **Verifies the album before you upload.** Every file is re-read from disk and checked for the things YouTube Music actually needs — including whether the audio is actually *there*, since a failed rip can produce full-length files containing nothing but silence. If it does not pass, a track-by-track tag editor opens instead.
 - **Catches the browser's upload dialog** and fills in every track, so uploading is one press of Open rather than navigating a file picker by hand.
 - **Browses and plays what you have already ripped**, so a finished album can be checked without leaving the app.
+- **Waits in the notification area for a disc**, optionally starting with Windows, and tells you when an audio CD goes in.
 
 Finished albums land in `C:\Users\<you>\Music\<Artist> - <Album> (<Year>)\`.
 

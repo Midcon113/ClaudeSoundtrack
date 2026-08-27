@@ -6,7 +6,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UseWPF>true</UseWPF>
+    <!-- The notification area needs WinForms; WPF has no tray icon of its own. -->
+    <UseWindowsForms>true</UseWindowsForms>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>ClaudeSoundtrack.ico</ApplicationIcon>
     <AssemblyName>ClaudeSoundtrack</AssemblyName>
     <RootNamespace>ClaudeSoundtrack.App</RootNamespace>
     <Product>ClaudeSoundtrack</Product>
@@ -17,6 +20,27 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ClaudeSoundtrack.Core\ClaudeSoundtrack.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Also carried as a resource, not just as the executable's icon, so the
+      windows and the notification-area icon can load it at runtime.
+      Regenerate with build\make-icon.ps1.
+    -->
+    <Resource Include="ClaudeSoundtrack.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Enabling WinForms for the tray icon also adds System.Drawing and
+      System.Windows.Forms as implicit global usings, which then collide with WPF
+      across the whole project - Color, Point, Size, Control and Application all
+      exist in both. Dropping the globals keeps WPF's meanings everywhere; the one
+      file that needs WinForms imports it explicitly.
+    -->
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Windows.Forms" />
   </ItemGroup>
 
 </Project>

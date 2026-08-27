@@ -34,6 +34,12 @@ public sealed class AppSettings
     public double LampSpeed { get; set; } = 1.0;
 
     /// <summary>
+    /// Sit in the notification area watching for a disc instead of closing, and
+    /// pop a notification when an audio CD appears.
+    /// </summary>
+    public bool WatchForDiscs { get; set; }
+
+    /// <summary>
     /// Stop checking whether Windows reports the right MIME type for .flac.
     ///
     /// Set once the user has fixed it or said they do not want to be told; a

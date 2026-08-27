@@ -82,6 +82,26 @@
                     </StackPanel>
                 </Border>
 
+                <!-- ===== Startup and disc watching ===== -->
+                <Border Style="{StaticResource RivetedPanel}" Padding="20,18" Margin="0,14,0,0">
+                    <StackPanel>
+                        <TextBlock Text="Startup" Style="{StaticResource PlateLabelText}" Margin="0,0,0,14" />
+
+                        <CheckBox x:Name="WatchDiscsCheck"
+                                  Style="{StaticResource PanelCheckBox}"
+                                  Content="Watch for discs in the notification area" />
+                        <TextBlock Style="{StaticResource DimText}" Margin="27,5,0,0" TextWrapping="Wrap"
+                                   Text="Keeps ClaudeSoundtrack running quietly by the clock. Put an audio CD in and it says so; click the notification to read and rip it. Closing the window then hides it rather than quitting — use Exit on the tray icon to quit properly." />
+
+                        <CheckBox x:Name="StartWithWindowsCheck"
+                                  Style="{StaticResource PanelCheckBox}"
+                                  Content="Start with Windows"
+                                  Margin="0,18,0,0" />
+                        <TextBlock Style="{StaticResource DimText}" Margin="27,5,0,0" TextWrapping="Wrap"
+                                   Text="Launches straight to the notification area at sign-in, so a disc is noticed without opening anything first. Your account only — no administrator rights, and nothing is installed." />
+                    </StackPanel>
+                </Border>
+
                 <!-- ===== Library location ===== -->
                 <Border Style="{StaticResource RivetedPanel}" Padding="20,18" Margin="0,14,0,0">
                     <StackPanel>

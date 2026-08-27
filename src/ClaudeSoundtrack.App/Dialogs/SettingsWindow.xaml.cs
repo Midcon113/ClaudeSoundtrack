@@ -36,6 +36,11 @@ public partial class SettingsWindow : PanelWindow
         SpeedSlider.Value = settings.LampSpeed;
         MusicFolderBox.Text = settings.MusicFolderOverride ?? string.Empty;
 
+        WatchDiscsCheck.IsChecked = settings.WatchForDiscs;
+        // The registry is the truth for this, not the settings file - the user may
+        // have removed the entry from Task Manager since we last looked.
+        StartWithWindowsCheck.IsChecked = StartupRegistration.IsEnabled;
+
         UpdateValueLabels();
         UpdateResolvedFolder();
 
@@ -152,6 +157,28 @@ public partial class SettingsWindow : PanelWindow
         _settings.LampSpeed = SpeedSlider.Value;
         _settings.MusicFolderOverride = folder;
 
+        var watchDiscs = WatchDiscsCheck.IsChecked == true;
+        var restartNeeded = watchDiscs != _settings.WatchForDiscs;
+        _settings.WatchForDiscs = watchDiscs;
+
+        // Starting with Windows without watching for discs would launch the app
+        // to a window nobody asked for, so the two go together.
+        var startWithWindows = StartWithWindowsCheck.IsChecked == true;
+        if (startWithWindows && !watchDiscs)
+        {
+            _settings.WatchForDiscs = true;
+            restartNeeded = true;
+        }
+
+        if (startWithWindows != StartupRegistration.IsEnabled &&
+            !StartupRegistration.SetEnabled(startWithWindows))
+        {
+            MessageBox.Show(this,
+                "Windows would not let the start-up entry be changed. " +
+                "It may be blocked by policy or by security software.",
+                "ClaudeSoundtrack", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
         if (!_settings.Save())
         {
             MessageBox.Show(this,
@@ -160,6 +187,19 @@ public partial class SettingsWindow : PanelWindow
         }
 
         UiState.Current.ApplyFrom(_settings);
+
+        // The tray icon and device hook are wired up at construction, so turning
+        // watching on or off only takes effect next launch. Say so rather than
+        // letting the setting look broken.
+        if (restartNeeded)
+        {
+            MessageBox.Show(this,
+                _settings.WatchForDiscs
+                    ? "Disc watching starts the next time you launch ClaudeSoundtrack."
+                    : "Disc watching stops the next time you launch ClaudeSoundtrack.",
+                "ClaudeSoundtrack", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
         DialogResult = true;
     }
 

@@ -66,7 +66,118 @@ public partial class MainWindow : PanelWindow
         // After the window is up, so the warning appears over a drawn panel
         // rather than in front of nothing.
         Loaded += (_, _) => CheckFlacMimeRegistration();
+
+        SetUpDiscWatching();
     }
+
+    // ================= Tray and disc watching =================
+
+    private TrayPresence? _tray;
+    private DiscWatcher? _discWatcher;
+
+    /// <summary>True when the app was launched by Windows at login.</summary>
+    private static bool StartedInTray =>
+        Environment.GetCommandLineArgs().Any(a => a.Equals("--tray", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Starts the notification-area icon and the disc watcher when either is
+    /// wanted, and hides the window if Windows launched us at login.
+    /// </summary>
+    private void SetUpDiscWatching()
+    {
+        // A single-file app gets moved around; keep the Run entry pointing at
+        // wherever it actually lives now.
+        StartupRegistration.RefreshPathIfRegistered();
+
+        var startedInTray = StartedInTray;
+        if (!_settings.WatchForDiscs && !startedInTray) return;
+
+        _tray = new TrayPresence(this);
+        _tray.RipRequested += (_, _) => BeginRipFromTray();
+
+        _discWatcher = new DiscWatcher();
+        _discWatcher.DiscInserted += OnDiscInserted;
+
+        if (startedInTray)
+        {
+            // Hidden before the first show, so nothing flashes on screen at login.
+            Visibility = Visibility.Hidden;
+            ShowInTaskbar = false;
+
+            // A window that is never shown never raises Loaded, so the watcher has
+            // to be started here. EnsureHandle inside Start creates the HWND
+            // without showing anything, which is all WM_DEVICECHANGE needs.
+            _discWatcher.Start(this);
+        }
+        else
+        {
+            Loaded += (_, _) => _discWatcher.Start(this);
+        }
+    }
+
+    private string? _pendingDiscPath;
+
+    private void OnDiscInserted(object? sender, DiscInsertedEventArgs e)
+    {
+        _pendingDiscPath = e.DevicePath;
+
+        SelectDrive(e.DevicePath);
+        SetStatus($"Audio CD detected in {e.DevicePath}. Press Read Disc to begin.");
+
+        // Only announce it if the window is not already in front of the user.
+        if (!IsVisible || WindowState == WindowState.Minimized)
+        {
+            _tray?.NotifyDiscInserted(e.DevicePath, e.VolumeLabel);
+        }
+    }
+
+    /// <summary>Brings the app up and reads whichever disc prompted the notification.</summary>
+    private async void BeginRipFromTray()
+    {
+        _tray?.ShowWindow();
+
+        if (_pendingDiscPath is not null) SelectDrive(_pendingDiscPath);
+
+        // Only auto-read from a clean start; barging into a rip in progress would
+        // be worse than doing nothing.
+        if (_stage == Stage.Disc && _project.Tracks.Count == 0)
+        {
+            await ReadSelectedDiscAsync();
+        }
+    }
+
+    /// <summary>Points the drive selector at a particular drive, if it is listed.</summary>
+    private void SelectDrive(string devicePath)
+    {
+        foreach (var item in DriveCombo.Items.OfType<ComboBoxItem>())
+        {
+            if (item.Tag is string tag && string.Equals(tag, devicePath, StringComparison.OrdinalIgnoreCase))
+            {
+                DriveCombo.SelectedItem = item;
+                return;
+            }
+        }
+
+        // The drive appeared after the list was built.
+        LoadDrives();
+    }
+
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        // Closing the window while watching means "get out of the way", not
+        // "stop watching" - otherwise the feature switches itself off the first
+        // time the user tidies their desktop.
+        if (_tray is not null && _settings.WatchForDiscs && !_isExiting)
+        {
+            e.Cancel = true;
+            _tray.HideWindow();
+            return;
+        }
+
+        base.OnClosing(e);
+    }
+
+    private bool _isExiting;
 
     /// <summary>
     /// Warns if Windows reports the wrong MIME type for .flac, which silently
@@ -240,7 +351,14 @@ public partial class MainWindow : PanelWindow
 
     private void RefreshDrivesButton_Click(object sender, RoutedEventArgs e) => LoadDrives();
 
-    private async void ReadDiscButton_Click(object sender, RoutedEventArgs e)
+    private async void ReadDiscButton_Click(object sender, RoutedEventArgs e) =>
+        await ReadSelectedDiscAsync();
+
+    /// <summary>
+    /// Reads the disc in the selected drive. Separate from the click handler so
+    /// the tray can trigger exactly the same path.
+    /// </summary>
+    private async Task ReadSelectedDiscAsync()
     {
         if (DriveCombo.SelectedItem is not ComboBoxItem { Tag: string devicePath }) return;
 
@@ -1059,6 +1177,12 @@ public partial class MainWindow : PanelWindow
         _ripCancellation?.Cancel();
         _ripCancellation?.Dispose();
         _lookup.Dispose();
+
+        _discWatcher?.Dispose();
+        // The tray icon outlives the window unless it is explicitly removed, and
+        // a ghost icon that does nothing until hovered is a classic Windows sin.
+        _tray?.Dispose();
+
         base.OnClosed(e);
     }
 }
