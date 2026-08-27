@@ -28,6 +28,12 @@ public partial class UploadInstructionsWindow : PanelWindow
         FolderText.Text = project.OutputFolder ?? "(unknown)";
     }
 
+    /// <summary>
+    /// True when the user wants the browser's file picker caught and filled in
+    /// rather than just having Explorer opened.
+    /// </summary>
+    public bool WatchForFileDialog => WatchForDialogCheck.IsChecked == true;
+
     private void OkButton_Click(object sender, RoutedEventArgs e) => DialogResult = true;
 
     private void EditButton_Click(object sender, RoutedEventArgs e) => DialogResult = false;

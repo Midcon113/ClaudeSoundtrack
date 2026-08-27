@@ -888,20 +888,82 @@ public partial class MainWindow : PanelWindow
         RefreshSummary();
     }
 
-    private void UploadButton_Click(object sender, RoutedEventArgs e)
+    private async void UploadButton_Click(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrEmpty(_project.OutputFolder)) return;
 
         var instructions = new UploadInstructionsWindow(_project) { Owner = this };
 
-        if (instructions.ShowDialog() == true)
-        {
-            OpenOutputFolder();
-        }
-        else
+        if (instructions.ShowDialog() != true)
         {
             // The user said it is not ready after all - fall back to the editor.
             ManualEditButton_Click(sender, e);
+            return;
+        }
+
+        if (!instructions.WatchForFileDialog)
+        {
+            OpenOutputFolder();
+            return;
+        }
+
+        await CatchUploadDialogAsync();
+    }
+
+    /// <summary>
+    /// Waits for the browser's file picker and points it at this album.
+    ///
+    /// Falls back to opening Explorer if no picker turns up, so the user is never
+    /// left with nothing to drag from.
+    /// </summary>
+    private async Task CatchUploadDialogAsync()
+    {
+        var files = _project.Tracks
+            .OrderBy(t => t.FlatTrackNumber)
+            .Select(t => t.FilePath)
+            .Where(p => !string.IsNullOrEmpty(p) && File.Exists(p))
+            .Select(p => p!)
+            .ToList();
+
+        SetStatus("Waiting for the browser's upload dialog... open Upload music in YouTube Music now.");
+        UiState.Current.IsWorking = true;
+
+        try
+        {
+            var outcome = await new FileDialogRedirector()
+                .RedirectNextDialogAsync(_project.OutputFolder!, files);
+
+            switch (outcome)
+            {
+                case FileDialogRedirector.Outcome.Redirected:
+                    SetStatus($"Upload dialog filled in with {files.Count} track(s). Press Open in the browser to start.");
+                    break;
+
+                case FileDialogRedirector.Outcome.NavigatedOnly:
+                    SetStatus("The upload dialog was found but the tracks would not stay selected. " +
+                              "Select them by hand in the album folder.");
+                    OpenOutputFolder();
+                    break;
+
+                case FileDialogRedirector.Outcome.DialogNotUnderstood:
+                    SetStatus("A file dialog opened but could not be filled in. Opening the album folder instead.");
+                    OpenOutputFolder();
+                    break;
+
+                default:
+                    SetStatus("No upload dialog appeared. Opening the album folder instead.");
+                    OpenOutputFolder();
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Could not watch for the upload dialog: {ex.Message}");
+            OpenOutputFolder();
+        }
+        finally
+        {
+            UiState.Current.IsWorking = false;
         }
     }
 

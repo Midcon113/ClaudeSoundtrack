@@ -68,23 +68,29 @@
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,11">
                     <TextBlock Text="2" Style="{StaticResource ReadoutText}" Width="24" />
                     <TextBlock Style="{StaticResource BodyText}" Width="560"
-                               Text="Click your profile picture, then Upload music." />
+                               Text="Click OK below, then click your profile picture and Upload music." />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,11">
                     <TextBlock Text="3" Style="{StaticResource ReadoutText}" Width="24" />
                     <TextBlock Style="{StaticResource BodyText}" Width="560"
-                               Text="Click OK below. The album folder opens in Explorer." />
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,11">
-                    <TextBlock Text="4" Style="{StaticResource ReadoutText}" Width="24" />
-                    <TextBlock Style="{StaticResource BodyText}" Width="560"
-                               Text="Select every FLAC file and drag them onto the upload page in one go. Uploading them together is what keeps them as a single album." />
+                               Text="The file picker your browser opens is caught and sent straight to this album, with every track already filled in. Just press Open." />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="5" Style="{StaticResource ReadoutText}" Width="24" />
+                    <TextBlock Text="4" Style="{StaticResource ReadoutText}" Width="24" />
                     <TextBlock Style="{StaticResource BodyText}" Width="560"
                                Text="Give it a few minutes to process. The album appears under Library, Albums." />
                 </StackPanel>
+
+                <Border Style="{StaticResource RecessedPanel}" Margin="0,16,0,0" Padding="14,10">
+                    <StackPanel>
+                        <CheckBox x:Name="WatchForDialogCheck"
+                                  Style="{StaticResource PanelCheckBox}"
+                                  IsChecked="True"
+                                  Content="Catch the browser's file picker and fill it in" />
+                        <TextBlock Style="{StaticResource DimText}" Margin="27,6,0,0"
+                                   Text="Turn this off to just open the album folder in Explorer and drag the files across yourself." />
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </Border>
 
