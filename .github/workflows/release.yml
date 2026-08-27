@@ -1,0 +1,58 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  # Lets a release be rebuilt without moving the tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and attach the .exe to (e.g. v1.0.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      # Never publish a build whose tests do not pass - a broken binary
+      # attached to a release is worse than no release at all.
+      - name: Test
+        run: dotnet test --configuration Release --verbosity normal
+
+      - name: Publish standalone executable
+        shell: pwsh
+        run: ./build/publish.ps1 -Runtime win-x64
+
+      - name: Attach the executable to the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Empty on a tag push, set on a manual run.
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          $tag = if ($env:INPUT_TAG) { $env:INPUT_TAG } else { $env:GITHUB_REF_NAME }
+          $exe = "artifacts/standalone/win-x64/ClaudeSoundtrack.exe"
+
+          if (-not (Test-Path $exe)) { throw "Publish did not produce $exe." }
+
+          # Create the release if the tag does not already have one, then upload.
+          # --clobber keeps a re-run from failing on an asset that already exists.
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title $tag --generate-notes
+          }
+
+          gh release upload $tag $exe --clobber

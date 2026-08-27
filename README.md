@@ -19,11 +19,16 @@ Expanded and complete-score releases are the awkward case. They arrive as two, t
 
 Finished albums land in `C:\Users\<you>\Music\<Artist> - <Album> (<Year>)\`.
 
+## Download
+
+Grab `ClaudeSoundtrack.exe` from the [latest release](https://github.com/Midcon113/ClaudeSoundtrack/releases/latest). It is a single self-contained file — no installer, no .NET runtime to install, no DLLs to keep beside it. Put it anywhere and run it.
+
 ## Requirements
 
 - Windows 11 (Windows 10 20H1 or later also works)
-- [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)
 - A CD/DVD/Blu-ray drive that can read audio CDs
+
+Nothing else. The [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) is only needed if you want to build it yourself.
 
 ## Building
 
@@ -40,6 +45,14 @@ dotnet run --project src/ClaudeSoundtrack.App
 ```
 
 There are no local path dependencies — everything comes from NuGet, so a fresh clone builds.
+
+To produce the standalone single-file executable yourself:
+
+```powershell
+.\build\publish.ps1
+```
+
+It lands in `artifacts\standalone\win-x64\`. Pass `-Runtime win-arm64` for Snapdragon machines. Trimming is deliberately disabled — ATL and the FLAC encoder both resolve types by reflection, and a trimmed build fails at runtime the first time it reads a tag.
 
 ## How it is put together
 
