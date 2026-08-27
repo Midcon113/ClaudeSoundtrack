@@ -33,7 +33,9 @@ public partial class MainWindow : PanelWindow
     private readonly ReadinessChecker _checker = new();
     private readonly MetadataLookupService _lookup = new();
 
-    private readonly AlbumProject _project = new();
+    // Not readonly: starting a new album replaces it wholesale. Reusing one
+    // instance across albums silently merged the second into the first.
+    private AlbumProject _project = new();
     private readonly ObservableCollection<MatchRow> _matches = new();
     private readonly ObservableCollection<IssueRow> _issues = new();
 
@@ -231,6 +233,95 @@ public partial class MainWindow : PanelWindow
         _settings.Save();
     }
 
+    // ================= Starting over =================
+
+    /// <summary>
+    /// Clears everything belonging to the album just finished and returns to the
+    /// first stage.
+    ///
+    /// This has to replace the whole project rather than tidy it. Every field
+    /// below outlived an album at some point: the output folder made a second
+    /// album's tracks land in the first album's folder, the track list made
+    /// flattening renumber across both, and the used-name set and disc counter
+    /// carried over with them.
+    /// </summary>
+    private void StartNewAlbum()
+    {
+        _project = new AlbumProject();
+
+        _matches.Clear();
+        _issues.Clear();
+        _usedFileStems.Clear();
+
+        _disc = null;
+        _selectedMatch = null;
+        _pendingArtwork = null;
+        _currentDiscNumber = 1;
+        _pendingDiscPath = null;
+
+        AlbumTitleBox.Text = string.Empty;
+        AlbumArtistBox.Text = string.Empty;
+        YearBox.Text = string.Empty;
+        SearchBox.Text = string.Empty;
+        DiscReadoutText.Text = "Awaiting disc...";
+        RipLogText.Text = string.Empty;
+
+        RipTrackProgress.Value = 0;
+        RipOverallProgress.Value = 0;
+        RipTrackLabel.Text = "Ready";
+        RipTrackPercent.Text = "0%";
+        RipOverallPercent.Text = "0%";
+
+        ArtworkIdlePanel.Visibility = Visibility.Visible;
+        ArtworkPreviewPanel.Visibility = Visibility.Collapsed;
+        ArtworkPreviewImage.Source = null;
+        ApplyArtworkButton.IsEnabled = false;
+
+        UploadButton.IsEnabled = false;
+        VerdictText.Text = "Not yet checked";
+        VerdictDetailText.Text = string.Empty;
+        VerdictLamp.Fill = new SolidColorBrush(Color.FromRgb(0x1A, 0x15, 0x12));
+        VerdictLamp.Effect = null;
+
+        LoadDrives();
+        GoToStage(Stage.Disc);
+        RefreshSummary();
+
+        SetStatus("Ready for a new album.");
+    }
+
+    /// <summary>
+    /// Asks whether to clear down after an album is finished.
+    ///
+    /// Offered rather than assumed, and offered at all because leaving the last
+    /// album loaded is what let a second one be started on top of it.
+    /// </summary>
+    private void OfferNewAlbum()
+    {
+        var answer = MessageBox.Show(this,
+            $"\"{_project.AlbumTitle}\" is done.\n\nClear it and start another album?",
+            "ClaudeSoundtrack", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+        if (answer == MessageBoxResult.Yes) StartNewAlbum();
+    }
+
+    private void NewAlbumButton_Click(object sender, RoutedEventArgs e)
+    {
+        // Only worth confirming when there is something to lose. The files on disk
+        // are safe either way; what is discarded is the in-app session.
+        if (_project.Tracks.Count > 0)
+        {
+            var answer = MessageBox.Show(this,
+                $"Start a new album?\n\n\"{_project.AlbumTitle}\" stays on disk at:\n{_project.OutputFolder}\n\n" +
+                "It is only cleared from this window.",
+                "ClaudeSoundtrack", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+
+            if (answer != MessageBoxResult.OK) return;
+        }
+
+        StartNewAlbum();
+    }
+
     // ================= Stage plumbing =================
 
     /// <summary>
@@ -361,6 +452,26 @@ public partial class MainWindow : PanelWindow
     private async Task ReadSelectedDiscAsync()
     {
         if (DriveCombo.SelectedItem is not ComboBoxItem { Tag: string devicePath }) return;
+
+        // Reading a fresh disc while a finished album is still loaded is how a
+        // second album ended up inheriting the first one's folder. Use "Rip
+        // Another Disc" to add a disc to the current set; this path is for a new
+        // album, so offer to clear down first.
+        if (_project.Tracks.Count > 0 && _stage >= Stage.Artwork)
+        {
+            var answer = MessageBox.Show(this,
+                $"\"{_project.AlbumTitle}\" is still loaded.\n\n" +
+                "Start a new album? It stays on disk either way.\n\n" +
+                "Choose No if this disc belongs to the album already loaded.",
+                "ClaudeSoundtrack", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+
+            if (answer == MessageBoxResult.Cancel) return;
+            if (answer == MessageBoxResult.Yes)
+            {
+                StartNewAlbum();
+                SelectDrive(devicePath);
+            }
+        }
 
         ReadDiscButton.IsEnabled = false;
         SetStatus("Reading the table of contents...");
@@ -574,12 +685,23 @@ public partial class MainWindow : PanelWindow
     /// </summary>
     private bool EnsureOutputFolder()
     {
-        if (!string.IsNullOrEmpty(_project.OutputFolder) && Directory.Exists(_project.OutputFolder)) return true;
+        var folderName = FileNaming.BuildAlbumFolderName(_project.AlbumTitle, _project.AlbumArtist, _project.Year);
+
+        if (!string.IsNullOrEmpty(_project.OutputFolder) && Directory.Exists(_project.OutputFolder))
+        {
+            // Reuse it only if it still belongs to this album. Disc 2 of a set
+            // must land beside disc 1, but a different album must not - reusing
+            // it unconditionally sent a second album's tracks into the first
+            // album's folder and left the upload pointing at the wrong place.
+            if (string.Equals(Path.GetFileName(_project.OutputFolder), folderName, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            _project.OutputFolder = null;
+        }
 
         try
         {
             var musicRoot = _settings.ResolveMusicFolder();
-            var folderName = FileNaming.BuildAlbumFolderName(_project.AlbumTitle, _project.AlbumArtist, _project.Year);
             var path = Path.Combine(musicRoot, folderName);
 
             // An existing folder with FLACs in it is almost always a previous run
@@ -1057,6 +1179,7 @@ public partial class MainWindow : PanelWindow
         if (uploaded == true)
         {
             SetStatus("Album uploaded to YouTube Music.");
+            OfferNewAlbum();
             return;
         }
 

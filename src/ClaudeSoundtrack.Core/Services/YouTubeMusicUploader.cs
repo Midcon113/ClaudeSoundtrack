@@ -76,6 +76,71 @@ public sealed class YouTubeMusicUploader : IDisposable
             cookies.TryGetValue(name, out var value) && !string.IsNullOrEmpty(value) ? value : null;
     }
 
+    /// <summary>
+    /// Checks the session is accepted, without uploading anything.
+    ///
+    /// Sends only the "start" request, which reserves an upload slot and sends no
+    /// audio; the reservation is simply abandoned. This exists so a rejected
+    /// session shows up in two seconds rather than after an album's worth of
+    /// failures, and so the exact status code is visible.
+    /// </summary>
+    /// <returns>Null when the session works, or a description of what went wrong.</returns>
+    public async Task<string?> TestSignInAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, UploadEndpoint);
+            ApplyAuth(request);
+            request.Headers.TryAddWithoutValidation("X-Goog-Upload-Command", "start");
+            request.Headers.TryAddWithoutValidation("X-Goog-Upload-Header-Content-Length", "1024");
+            request.Headers.TryAddWithoutValidation("X-Goog-Upload-Protocol", "resumable");
+            request.Content = new StringContent(
+                "filename=test.flac", Encoding.UTF8, "application/x-www-form-urlencoded");
+
+            using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+                return $"{DescribeFailure(response)} {await SummariseBodyAsync(response, cancellationToken).ConfigureAwait(false)}".TrimEnd();
+
+            if (!response.Headers.Contains("X-Goog-Upload-URL"))
+                return "YouTube accepted the request but returned no upload URL. " +
+                       "That usually means the session is not signed in to YouTube Music specifically - " +
+                       "open music.youtube.com in Firefox and confirm your avatar appears.";
+
+            return null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return $"Could not reach YouTube: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Pulls a short, safe excerpt out of an error response.
+    ///
+    /// Google returns HTML error pages that are useless in full but whose first
+    /// line often names the problem. Never includes request headers, so the
+    /// credentials cannot leak into a message shown on screen.
+    /// </summary>
+    private static async Task<string> SummariseBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(body)) return string.Empty;
+
+            var condensed = string.Join(" ", body
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Take(3));
+
+            return condensed.Length > 200 ? condensed[..200] + "..." : condensed;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
     /// <summary>Rejects files YouTube Music will not take, before anything is sent.</summary>
     /// <returns>A reason string, or null when the file is acceptable.</returns>
     public static string? Validate(string filePath)

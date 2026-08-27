@@ -117,6 +117,54 @@ public partial class DirectUploadWindow : PanelWindow
         };
     }
 
+    /// <summary>
+    /// Checks the session against YouTube without uploading anything, so a
+    /// rejection shows up in seconds with its actual status code rather than as
+    /// an album's worth of identical failures.
+    /// </summary>
+    private async void TestButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_cookies is null) return;
+
+        TestButton.IsEnabled = false;
+        StatusText.Text = "Asking YouTube whether it accepts the session...";
+
+        try
+        {
+            using var uploader = new YouTubeMusicUploader(_cookies);
+            var problem = await uploader.TestSignInAsync();
+
+            if (problem is null)
+            {
+                StatusText.Text = "YouTube accepted the session. Upload should work.";
+                SetLamp((Color)FindResource("LampGreenColor"));
+                SessionText.Text = "SESSION ACCEPTED";
+                SessionDetailText.Text = "Verified against YouTube, not just read from Firefox.";
+            }
+            else
+            {
+                StatusText.Text = "Sign-in test failed.";
+                SetLamp((Color)FindResource("LampRedColor"));
+                SessionText.Text = "SESSION REJECTED";
+                SessionDetailText.Text = problem;
+
+                // Also put it where it can be selected and copied.
+                ConsentPanel.Visibility = Visibility.Collapsed;
+                ProgressPanel.Visibility = Visibility.Visible;
+                AppendLog("Sign-in test failed:");
+                AppendLog("  " + problem);
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Could not run the test: {ex.Message}";
+        }
+        finally
+        {
+            TestButton.IsEnabled = true;
+        }
+    }
+
     private async void UploadButton_Click(object sender, RoutedEventArgs e)
     {
         if (_cookies is null) return;
