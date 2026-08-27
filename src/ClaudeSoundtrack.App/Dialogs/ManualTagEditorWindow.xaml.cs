@@ -14,7 +14,7 @@ namespace ClaudeSoundtrack.App.Dialogs;
 /// Everything here writes directly to the FLAC files, so the readiness check can
 /// be re-run against disk afterwards and mean something.
 /// </summary>
-public partial class ManualTagEditorWindow : Window
+public partial class ManualTagEditorWindow : PanelWindow
 {
     private readonly AlbumProject _project;
     private readonly TaggingService _tagger;

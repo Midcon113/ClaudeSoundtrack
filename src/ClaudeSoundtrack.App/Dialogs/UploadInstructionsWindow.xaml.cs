@@ -11,7 +11,7 @@ namespace ClaudeSoundtrack.App.Dialogs;
 /// wrong. Choosing "Not Ready" returns them to the tag editor rather than
 /// opening the folder.
 /// </summary>
-public partial class UploadInstructionsWindow : Window
+public partial class UploadInstructionsWindow : PanelWindow
 {
     public UploadInstructionsWindow(AlbumProject project)
     {

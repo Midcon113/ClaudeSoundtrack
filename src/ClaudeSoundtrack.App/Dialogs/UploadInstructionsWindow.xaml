@@ -1,14 +1,17 @@
-<Window x:Class="ClaudeSoundtrack.App.Dialogs.UploadInstructionsWindow"
+<local:PanelWindow x:Class="ClaudeSoundtrack.App.Dialogs.UploadInstructionsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:ClaudeSoundtrack.App"
         Title="Ready to upload"
+        CaptionHeight="90"
         Height="600" Width="720"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         Background="{StaticResource WorkshopBrush}"
         FontFamily="{StaticResource BodyFont}">
 
-    <Grid Margin="18">
+  <Border Style="{StaticResource ChassisEdge}">
+    <Grid Margin="14">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -17,7 +20,18 @@
         </Grid.RowDefinitions>
 
         <!-- The all-clear lamp, lit green. -->
-        <Border Grid.Row="0" Style="{StaticResource RivetedPanel}" Padding="22,18">
+        <Border Grid.Row="0" Style="{StaticResource RivetedPanel}" Padding="22,18,10,18">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <!-- Closing the window means "not ready", same as the Edit button. -->
+              <Button Grid.Column="1" Content="✕"
+                      Style="{StaticResource CloseCaptionButton}"
+                      AutomationProperties.Name="Close"
+                      VerticalAlignment="Top" Margin="0,-8,0,0"
+                      Click="EditButton_Click" />
             <StackPanel Orientation="Horizontal">
                 <Grid Width="44" Height="44" VerticalAlignment="Center">
                     <Ellipse Stroke="{StaticResource BrassEdgeBrush}" StrokeThickness="3" Fill="{StaticResource RecessBrush}" />
@@ -32,6 +46,7 @@
                     <TextBlock x:Name="SummaryText" Style="{StaticResource DimText}" Margin="0,4,0,0" />
                 </StackPanel>
             </StackPanel>
+            </Grid>
         </Border>
 
         <Border Grid.Row="1" Style="{StaticResource RecessedPanel}" Margin="0,16,0,0" Padding="16,12">
@@ -87,4 +102,5 @@
             </StackPanel>
         </Grid>
     </Grid>
-</Window>
+  </Border>
+</local:PanelWindow>

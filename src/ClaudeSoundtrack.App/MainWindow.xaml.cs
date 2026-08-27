@@ -20,10 +20,12 @@ using Path = System.IO.Path;
 
 namespace ClaudeSoundtrack.App;
 
-public partial class MainWindow : Window
+public partial class MainWindow : PanelWindow
 {
     /// <summary>The five stages shown down the left rail.</summary>
     private enum Stage { Disc = 0, Identify = 1, Rip = 2, Artwork = 3, Verify = 4 }
+
+    private readonly AppSettings _settings = AppSettings.Load();
 
     private readonly OpticalDriveService _drives = new();
     private readonly CdRipService _ripper = new();
@@ -51,11 +53,32 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        // Push the saved look into the live state before anything renders, so the
+        // lamps come up at the user's chosen glow rather than flashing at default.
+        UiState.Current.ApplyFrom(_settings);
+
         MatchList.ItemsSource = _matches;
         IssueList.ItemsSource = _issues;
 
         LoadDrives();
         GoToStage(Stage.Disc);
+    }
+
+    // ================= Window furniture =================
+
+    private void MinimiseButton_Click(object sender, RoutedEventArgs e) => Minimise();
+
+    private void MaximiseButton_Click(object sender, RoutedEventArgs e) => ToggleMaximise();
+
+    private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void SettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SettingsWindow(_settings) { Owner = this };
+        dialog.ShowDialog();
+
+        // The dialog edits UiState live for preview; persist whatever survived.
+        _settings.Save();
     }
 
     // ================= Stage plumbing =================
@@ -398,7 +421,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var musicRoot = ResolveMusicFolder();
+            var musicRoot = _settings.ResolveMusicFolder();
             var folderName = FileNaming.BuildAlbumFolderName(_project.AlbumTitle, _project.AlbumArtist, _project.Year);
             var path = Path.Combine(musicRoot, folderName);
 
@@ -425,29 +448,6 @@ public partial class MainWindow : Window
                 "ClaudeSoundtrack", MessageBoxButton.OK, MessageBoxImage.Error);
             return false;
         }
-    }
-
-    /// <summary>
-    /// Finds the Music folder to write albums into.
-    ///
-    /// Deliberately prefers the real profile folder over
-    /// <see cref="Environment.SpecialFolder.MyMusic"/>. When OneDrive's Known
-    /// Folder Move is enabled, MyMusic resolves to OneDrive\Music, and a rip
-    /// silently lands in cloud storage - which then starts uploading gigabytes of
-    /// FLAC. The local folder is what people mean by "my Music folder".
-    /// </summary>
-    private static string ResolveMusicFolder()
-    {
-        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        if (!string.IsNullOrEmpty(profile))
-        {
-            var local = Path.Combine(profile, "Music");
-            if (Directory.Exists(local)) return local;
-        }
-
-        // No local Music folder: fall back to whatever Windows reports, which at
-        // least always exists.
-        return Environment.GetFolderPath(Environment.SpecialFolder.MyMusic);
     }
 
     private async Task RipCurrentDiscAsync()
@@ -482,8 +482,22 @@ public partial class MainWindow : Window
             AppendRipLog($"Writing to {_project.OutputFolder}");
             AppendRipLog($"{newTracks.Count} tracks queued.");
 
-            await _ripper.RipTracksAsync(
-                devicePath, newTracks, _project.OutputFolder!, fileNames, progress, _ripCancellation.Token);
+            // Lights up the header lamp bank for the duration.
+            UiState.Current.IsWorking = true;
+
+            // Task.Run is load-bearing, not decoration. FoxRedbook's
+            // ReadSectorsAsync issues its SCSI command synchronously and hands
+            // back an already-completed Task, so awaiting it does not yield - the
+            // whole rip ran on the UI thread and the window froze solid for the
+            // length of the disc, progress bar included.
+            //
+            // Progress<T> captured the UI SynchronizationContext when it was
+            // constructed above, so reports still marshal back correctly.
+            var token = _ripCancellation.Token;
+            await Task.Run(
+                () => _ripper.RipTracksAsync(
+                    devicePath, newTracks, _project.OutputFolder!, fileNames, progress, token),
+                token);
 
             _project.RippedDiscs.Add(_currentDiscNumber);
             _project.DiscCount = _project.RippedDiscs.Count;
@@ -518,6 +532,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            UiState.Current.IsWorking = false;
             _ripCancellation?.Dispose();
             _ripCancellation = null;
             RefreshSummary();

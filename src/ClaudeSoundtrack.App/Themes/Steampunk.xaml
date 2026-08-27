@@ -1,5 +1,6 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework">
 
     <!--
         ClaudeSoundtrack visual language.
@@ -328,6 +329,62 @@
         </Style.Triggers>
     </Style>
 
+    <!-- ===== Caption buttons ===== -->
+
+    <!--
+        Minimise / maximise / close for the borderless panel. Deliberately flat
+        and unlit: they are window furniture, not panel controls, and giving them
+        the brass treatment would make them compete with the actual switches.
+        Close is the only one that lights, and only on hover, in fault red.
+    -->
+    <Style x:Key="CaptionButton" TargetType="Button">
+        <Setter Property="Width" Value="42" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{StaticResource ParchmentDimBrush}" />
+        <Setter Property="FontFamily" Value="{StaticResource BodyFont}" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Cursor" Value="Hand" />
+        <!-- Without this the chrome treats them as caption and drags the window. -->
+        <Setter Property="shell:WindowChrome.IsHitTestVisibleInChrome" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Face" Background="{TemplateBinding Background}" CornerRadius="2">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Face" Property="Background" Value="{StaticResource SteelHighlightBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource BrassPaleBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Face" Property="Background" Value="{StaticResource RecessBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="CloseCaptionButton" TargetType="Button" BasedOn="{StaticResource CaptionButton}">
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Foreground" Value="#FFFFFF" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!--
+        The outer edge of the chassis. With no Windows frame the panel supplies
+        its own, or it floats shapelessly against whatever is behind it.
+    -->
+    <Style x:Key="ChassisEdge" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource WorkshopBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BrassDarkBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+
     <!-- ===== Text input ===== -->
 
     <Style x:Key="PanelTextBox" TargetType="TextBox">
@@ -528,7 +585,7 @@
                                         <ControlTemplate TargetType="Thumb">
                                             <Border Background="{StaticResource BrassEdgeBrush}"
                                                     CornerRadius="5"
-                                                    Margin="2,0"
+                                                    Margin="2"
                                                     Opacity="0.75" />
                                         </ControlTemplate>
                                     </Thumb.Template>
@@ -543,6 +600,143 @@
                             </Track.DecreaseRepeatButton>
                         </Track>
                     </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <!--
+                Horizontal bars need the track laid out along the other axis, the
+                commands swapped, and the direction un-reversed - otherwise a wide
+                table's scrollbar drags backwards.
+            -->
+            <Trigger Property="Orientation" Value="Horizontal">
+                <Setter Property="Width" Value="Auto" />
+                <Setter Property="Height" Value="12" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ScrollBar">
+                            <Grid Background="#0C0A08">
+                                <Track x:Name="PART_Track" IsDirectionReversed="False">
+                                    <Track.Thumb>
+                                        <Thumb>
+                                            <Thumb.Template>
+                                                <ControlTemplate TargetType="Thumb">
+                                                    <Border Background="{StaticResource BrassEdgeBrush}"
+                                                            CornerRadius="5"
+                                                            Margin="2"
+                                                            Opacity="0.75" />
+                                                </ControlTemplate>
+                                            </Thumb.Template>
+                                        </Thumb>
+                                    </Track.Thumb>
+                                    <Track.IncreaseRepeatButton>
+                                        <RepeatButton Command="ScrollBar.PageRightCommand" Opacity="0" />
+                                    </Track.IncreaseRepeatButton>
+                                    <Track.DecreaseRepeatButton>
+                                        <RepeatButton Command="ScrollBar.PageLeftCommand" Opacity="0" />
+                                    </Track.DecreaseRepeatButton>
+                                </Track>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- Applied to every scrollbar in the app: the default chrome scrollbar is a
+         bright grey slab that breaks the illusion wherever a list overflows. -->
+    <Style TargetType="ScrollBar" BasedOn="{StaticResource PanelScrollBar}" />
+
+    <!-- ===== Slider ===== -->
+
+    <!--
+        A brass thumb running in a recessed rail, like a fader on the panel.
+        The lit portion of the rail shows the current value, so the control reads
+        at a glance without a numeric label.
+    -->
+    <Style TargetType="Slider">
+        <Setter Property="Height" Value="26" />
+        <Setter Property="Foreground" Value="{StaticResource AmberBrush}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Slider">
+                    <Grid VerticalAlignment="Center">
+                        <!-- Rail -->
+                        <Border Height="7" VerticalAlignment="Center"
+                                Background="{StaticResource RecessBrush}"
+                                BorderBrush="{StaticResource BrassDarkBrush}"
+                                BorderThickness="1"
+                                CornerRadius="3" />
+
+                        <Track x:Name="PART_Track">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Command="Slider.DecreaseLarge">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <!-- The travelled part of the rail, lit. -->
+                                            <Grid Background="Transparent">
+                                                <Border Height="5" VerticalAlignment="Center"
+                                                        Margin="1,0,0,0"
+                                                        CornerRadius="2">
+                                                    <Border.Background>
+                                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                            <GradientStop Color="{StaticResource AmberBrightColor}" Offset="0" />
+                                                            <GradientStop Color="{StaticResource AmberColor}" Offset="0.5" />
+                                                            <GradientStop Color="{StaticResource AmberDimColor}" Offset="1" />
+                                                        </LinearGradientBrush>
+                                                    </Border.Background>
+                                                    <Border.Effect>
+                                                        <DropShadowEffect Color="{StaticResource AmberColor}"
+                                                                          BlurRadius="10" ShadowDepth="0" Opacity="0.5" />
+                                                    </Border.Effect>
+                                                </Border>
+                                            </Grid>
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.DecreaseRepeatButton>
+
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Command="Slider.IncreaseLarge">
+                                    <RepeatButton.Template>
+                                        <ControlTemplate TargetType="RepeatButton">
+                                            <!-- Transparent, but must still take clicks so
+                                                 clicking the rail pages the value. -->
+                                            <Border Background="Transparent" />
+                                        </ControlTemplate>
+                                    </RepeatButton.Template>
+                                </RepeatButton>
+                            </Track.IncreaseRepeatButton>
+
+                            <Track.Thumb>
+                                <Thumb x:Name="Grip" Width="16" Height="22">
+                                    <Thumb.Template>
+                                        <ControlTemplate TargetType="Thumb">
+                                            <Grid>
+                                                <Border Background="{StaticResource BrassEdgeBrush}"
+                                                        BorderBrush="#2A2214"
+                                                        BorderThickness="1"
+                                                        CornerRadius="3" />
+                                                <!-- Knurling, so it reads as something to grip. -->
+                                                <StackPanel Orientation="Horizontal"
+                                                            HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                    <Rectangle Width="1" Height="10" Fill="#3A2E14" Margin="1,0" Opacity="0.8" />
+                                                    <Rectangle Width="1" Height="10" Fill="#3A2E14" Margin="1,0" Opacity="0.8" />
+                                                    <Rectangle Width="1" Height="10" Fill="#3A2E14" Margin="1,0" Opacity="0.8" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </ControlTemplate>
+                                    </Thumb.Template>
+                                </Thumb>
+                            </Track.Thumb>
+                        </Track>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>

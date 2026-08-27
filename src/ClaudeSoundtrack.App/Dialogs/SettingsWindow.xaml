@@ -1,0 +1,125 @@
+<local:PanelWindow x:Class="ClaudeSoundtrack.App.Dialogs.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:ClaudeSoundtrack.App"
+        xmlns:controls="clr-namespace:ClaudeSoundtrack.App.Controls"
+        Title="Settings"
+        Height="600" Width="640"
+        MinHeight="520" MinWidth="560"
+        CaptionHeight="56"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WorkshopBrush}"
+        FontFamily="{StaticResource BodyFont}">
+
+  <Border Style="{StaticResource ChassisEdge}">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Caption strip -->
+        <Border Grid.Row="0" Style="{StaticResource RivetedPanel}" Padding="20,10,10,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="Settings" Style="{StaticResource PanelTitleText}" VerticalAlignment="Center" />
+                <Button Grid.Column="1" Content="✕"
+                        Style="{StaticResource CloseCaptionButton}" AutomationProperties.Name="Close"
+                        VerticalAlignment="Top" Margin="0,-2,0,0"
+                        Click="CloseButton_Click" />
+            </Grid>
+        </Border>
+
+        <ScrollViewer Grid.Row="1" Margin="0,14,0,0" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+
+                <!-- ===== Panel lighting ===== -->
+                <Border Style="{StaticResource RivetedPanel}" Padding="20,18">
+                    <StackPanel>
+                        <TextBlock Text="Panel lighting" Style="{StaticResource PlateLabelText}" Margin="0,0,0,6" />
+                        <TextBlock Style="{StaticResource DimText}" Margin="0,0,0,16"
+                                   Text="How strongly the lamps glow. The row below previews the change as you drag." />
+
+                        <!-- Live preview: the setting is about how something looks,
+                             so it should be judged by looking at it. -->
+                        <Border Style="{StaticResource RecessedPanel}" Padding="18,16" Margin="0,0,0,16">
+                            <controls:LampBank x:Name="PreviewBank"
+                                               LampCount="9" LampSize="15"
+                                               LampColor="{StaticResource AmberColor}"
+                                               HorizontalAlignment="Center" />
+                        </Border>
+
+                        <Grid Margin="0,0,0,4">
+                            <TextBlock Text="Glow" Style="{StaticResource BodyText}" />
+                            <TextBlock x:Name="BloomValueText" Style="{StaticResource ReadoutText}"
+                                       HorizontalAlignment="Right" />
+                        </Grid>
+                        <Slider x:Name="BloomSlider"
+                                Minimum="0" Maximum="1" SmallChange="0.05" LargeChange="0.1"
+                                IsSnapToTickEnabled="False"
+                                ValueChanged="BloomSlider_ValueChanged" />
+
+                        <CheckBox x:Name="AnimateCheck"
+                                  Style="{StaticResource PanelCheckBox}"
+                                  Content="Animate the lamps while ripping"
+                                  Margin="0,20,0,0"
+                                  Checked="AnimateCheck_Changed" Unchecked="AnimateCheck_Changed" />
+                        <TextBlock Style="{StaticResource DimText}" Margin="27,5,0,0"
+                                   Text="Turn this off to keep the lamps steady. The glow setting still applies." />
+
+                        <Grid Margin="0,18,0,4">
+                            <TextBlock Text="Animation speed" Style="{StaticResource BodyText}" />
+                            <TextBlock x:Name="SpeedValueText" Style="{StaticResource ReadoutText}"
+                                       HorizontalAlignment="Right" />
+                        </Grid>
+                        <Slider x:Name="SpeedSlider"
+                                Minimum="0.25" Maximum="3" SmallChange="0.05" LargeChange="0.25"
+                                ValueChanged="SpeedSlider_ValueChanged" />
+                    </StackPanel>
+                </Border>
+
+                <!-- ===== Library location ===== -->
+                <Border Style="{StaticResource RivetedPanel}" Padding="20,18" Margin="0,14,0,0">
+                    <StackPanel>
+                        <TextBlock Text="Library folder" Style="{StaticResource PlateLabelText}" Margin="0,0,0,6" />
+                        <TextBlock Style="{StaticResource DimText}" Margin="0,0,0,14"
+                                   Text="Where finished albums are written. Left blank this uses your local Music folder, avoiding a OneDrive-redirected one that would sync every rip to the cloud." />
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0" x:Name="MusicFolderBox" Style="{StaticResource PanelTextBox}" />
+                            <Button Grid.Column="1" Content="Browse"
+                                    Style="{StaticResource BrassButton}"
+                                    MinWidth="0" Padding="14,8" Margin="10,0,0,0"
+                                    Click="BrowseFolder_Click" />
+                            <Button Grid.Column="2" Content="Default"
+                                    Style="{StaticResource BrassButton}"
+                                    MinWidth="0" Padding="14,8" Margin="8,0,0,0"
+                                    Click="DefaultFolder_Click" />
+                        </Grid>
+
+                        <TextBlock x:Name="ResolvedFolderText" Style="{StaticResource DimText}" Margin="0,10,0,0" />
+                    </StackPanel>
+                </Border>
+
+                <TextBlock x:Name="SettingsPathText" Style="{StaticResource DimText}" Margin="4,14,0,0" />
+            </StackPanel>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+            <Button Content="Cancel" Style="{StaticResource BrassButton}" Margin="0,0,10,0"
+                    Click="CancelButton_Click" />
+            <Button Content="Save" Style="{StaticResource AmberButton}"
+                    Click="SaveButton_Click" />
+        </StackPanel>
+    </Grid>
+  </Border>
+</local:PanelWindow>

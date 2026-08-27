@@ -1,14 +1,17 @@
-<Window x:Class="ClaudeSoundtrack.App.Dialogs.ManualTagEditorWindow"
+<local:PanelWindow x:Class="ClaudeSoundtrack.App.Dialogs.ManualTagEditorWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:ClaudeSoundtrack.App"
         Title="Edit tags"
+        CaptionHeight="80"
         Height="760" Width="1080"
         MinHeight="600" MinWidth="880"
         WindowStartupLocation="CenterOwner"
         Background="{StaticResource WorkshopBrush}"
         FontFamily="{StaticResource BodyFont}">
 
-    <Grid Margin="18">
+  <Border Style="{StaticResource ChassisEdge}">
+    <Grid Margin="14">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -17,12 +20,23 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Style="{StaticResource RivetedPanel}" Padding="20,14">
-            <StackPanel>
-                <TextBlock Text="Edit tags" Style="{StaticResource PanelTitleText}" />
-                <TextBlock Style="{StaticResource DimText}" Margin="0,4,0,0"
-                           Text="Correct anything the readiness check flagged. Changes are written straight into the FLAC files." />
-            </StackPanel>
+        <Border Grid.Row="0" Style="{StaticResource RivetedPanel}" Padding="20,14,10,14">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="Edit tags" Style="{StaticResource PanelTitleText}" />
+                    <TextBlock Style="{StaticResource DimText}" Margin="0,4,0,0"
+                               Text="Correct anything the readiness check flagged. Changes are written straight into the FLAC files." />
+                </StackPanel>
+                <Button Grid.Column="1" Content="✕"
+                        Style="{StaticResource CloseCaptionButton}"
+                        AutomationProperties.Name="Close"
+                        VerticalAlignment="Top" Margin="0,-4,0,0"
+                        Click="CloseButton_Click" />
+            </Grid>
         </Border>
 
         <!-- Album-wide fields, applied to every track at once. -->
@@ -141,4 +155,5 @@
             </StackPanel>
         </Grid>
     </Grid>
-</Window>
+  </Border>
+</local:PanelWindow>

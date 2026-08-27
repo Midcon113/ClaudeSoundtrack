@@ -13,7 +13,7 @@ namespace ClaudeSoundtrack.App.Dialogs;
 /// soundtrack pressing is frequently the wrong edition's cover, and once it is
 /// embedded across eighty tracks, undoing it means re-tagging the lot.
 /// </summary>
-public partial class ArtworkSelectionWindow : Window
+public partial class ArtworkSelectionWindow : PanelWindow
 {
     /// <summary>A candidate wrapped for display, with its thumbnail decoded.</summary>
     private sealed class CandidateRow
