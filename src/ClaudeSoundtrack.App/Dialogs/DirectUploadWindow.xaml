@@ -1,0 +1,133 @@
+<local:PanelWindow x:Class="ClaudeSoundtrack.App.Dialogs.DirectUploadWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:ClaudeSoundtrack.App"
+        xmlns:controls="clr-namespace:ClaudeSoundtrack.App.Controls"
+        Title="Upload to YouTube Music"
+        CaptionHeight="70"
+        Height="700" Width="820"
+        MinHeight="560" MinWidth="700"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WorkshopBrush}"
+        FontFamily="{StaticResource BodyFont}">
+
+  <Border Style="{StaticResource ChassisEdge}">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Caption -->
+        <Border Grid.Row="0" Style="{StaticResource RivetedPanel}" Padding="20,12,10,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Upload to YouTube Music" Style="{StaticResource PanelTitleText}" />
+                    <TextBlock x:Name="AlbumText" Style="{StaticResource DimText}" Margin="0,3,0,0" />
+                </StackPanel>
+                <controls:LampBank Grid.Column="1" LampCount="7" LampSize="10"
+                                   LampColor="{StaticResource AmberColor}"
+                                   VerticalAlignment="Center" Margin="18,0" />
+                <Button Grid.Column="2" Content="✕" Style="{StaticResource CloseCaptionButton}"
+                        AutomationProperties.Name="Close"
+                        VerticalAlignment="Top" Margin="0,-2,0,0"
+                        Click="CloseButton_Click" />
+            </Grid>
+        </Border>
+
+        <!-- Session state -->
+        <Border Grid.Row="1" Style="{StaticResource RecessedPanel}" Margin="0,14,0,0" Padding="18,14">
+            <StackPanel Orientation="Horizontal">
+                <Grid Width="30" Height="30" VerticalAlignment="Center">
+                    <Ellipse Stroke="{StaticResource BrassEdgeBrush}" StrokeThickness="2"
+                             Fill="{StaticResource RecessBrush}" />
+                    <Ellipse x:Name="SessionLamp" Width="15" Height="15" Fill="#1A1512" />
+                </Grid>
+                <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
+                    <TextBlock x:Name="SessionText" Style="{StaticResource ReadoutText}" Text="Checking session..." />
+                    <TextBlock x:Name="SessionDetailText" Style="{StaticResource DimText}" Margin="0,4,0,0" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Body: consent up front, log once running -->
+        <Grid Grid.Row="2" Margin="0,14,0,0">
+            <Border x:Name="ConsentPanel" Style="{StaticResource RivetedPanel}" Padding="22,18">
+                <StackPanel>
+                    <TextBlock Text="Before it starts" Style="{StaticResource PlateLabelText}" Margin="0,0,0,14" />
+
+                    <TextBlock Style="{StaticResource BodyText}" Margin="0,0,0,10"
+                               Text="This sends your tracks straight to YouTube Music, so no browser or file picker is involved." />
+
+                    <TextBlock Style="{StaticResource BodyText}" Margin="0,0,0,10">
+                        <Run Text="To do that it signs in as you, reusing the YouTube session already in your Firefox profile." />
+                        <Run Text="Those cookies are read from this machine, held in memory for the upload, and sent only to Google over HTTPS." FontStyle="Italic" />
+                        <Run Text="They are never written to a file, logged, or sent anywhere else." />
+                    </TextBlock>
+
+                    <Border Style="{StaticResource RecessedPanel}" Padding="14,12" Margin="0,8,0,0">
+                        <StackPanel>
+                            <TextBlock Text="What will be uploaded" Style="{StaticResource PlateLabelText}" Margin="0,0,0,8" />
+                            <TextBlock x:Name="ManifestText" Style="{StaticResource ReadoutText}" FontSize="12" />
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Style="{StaticResource DimText}" Margin="0,14,0,0" TextWrapping="Wrap"
+                               Text="YouTube Music has no official upload API. This drives the same request its web player makes, which works but is not supported by Google and could stop working without notice. If it does, the browser route still exists." />
+                </StackPanel>
+            </Border>
+
+            <Border x:Name="ProgressPanel" Style="{StaticResource RivetedPanel}" Padding="20,16" Visibility="Collapsed">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0">
+                        <Grid Margin="0,0,0,6">
+                            <TextBlock x:Name="CurrentFileText" Style="{StaticResource ReadoutText}" Text="" />
+                            <TextBlock x:Name="CountText" Style="{StaticResource ReadoutText}"
+                                       HorizontalAlignment="Right" Text="" />
+                        </Grid>
+                        <ProgressBar x:Name="UploadProgressBar" Style="{StaticResource GaugeBar}"
+                                     Height="24" Minimum="0" Maximum="100" />
+                    </StackPanel>
+
+                    <Border Grid.Row="1" Style="{StaticResource RecessedPanel}" Margin="0,16,0,0">
+                        <ScrollViewer x:Name="LogScroller" VerticalScrollBarVisibility="Auto">
+                            <TextBlock x:Name="LogText" Style="{StaticResource ReadoutText}"
+                                       FontSize="12" LineHeight="18" />
+                        </ScrollViewer>
+                    </Border>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Actions -->
+        <Grid Grid.Row="3" Margin="0,14,0,0">
+            <TextBlock x:Name="StatusText" Style="{StaticResource DimText}" VerticalAlignment="Center" Text="" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="BrowserButton" Content="Use Browser Instead"
+                        Style="{StaticResource BrassButton}" Margin="0,0,10,0" MinWidth="0" Padding="14,9"
+                        Click="BrowserButton_Click" />
+                <Button x:Name="CancelButton" Content="Cancel"
+                        Style="{StaticResource BrassButton}" Margin="0,0,10,0"
+                        Visibility="Collapsed"
+                        Click="CancelButton_Click" />
+                <Button x:Name="UploadButton" Content="Upload Now"
+                        Style="{StaticResource AmberButton}"
+                        IsEnabled="False"
+                        Click="UploadButton_Click" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+  </Border>
+</local:PanelWindow>

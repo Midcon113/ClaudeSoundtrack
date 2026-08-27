@@ -898,6 +898,23 @@ public partial class MainWindow : PanelWindow
     {
         if (string.IsNullOrEmpty(_project.OutputFolder)) return;
 
+        // Direct upload first: it needs no browser at all. Falls through to the
+        // browser route if the session is missing or the user prefers it.
+        var direct = new DirectUploadWindow(_project) { Owner = this };
+        var uploaded = direct.ShowDialog();
+
+        if (uploaded == true)
+        {
+            SetStatus("Album uploaded to YouTube Music.");
+            return;
+        }
+
+        if (!direct.UseBrowserInstead)
+        {
+            SetStatus("Upload cancelled.");
+            return;
+        }
+
         var instructions = new UploadInstructionsWindow(_project) { Owner = this };
 
         if (instructions.ShowDialog() != true)

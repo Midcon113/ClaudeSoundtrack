@@ -15,6 +15,8 @@
     <PackageReference Include="CUETools.Codecs.Flake" Version="1.0.5" />
     <!-- Vorbis comment tagging and embedded artwork. -->
     <PackageReference Include="z440.atl.core" Version="7.16.0" />
+    <!-- Reads the local Firefox cookie database for YouTube Music uploads. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
   </ItemGroup>
 
 </Project>
