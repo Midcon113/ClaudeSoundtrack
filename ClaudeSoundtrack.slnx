@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/ClaudeSoundtrack.App/ClaudeSoundtrack.App.csproj" />
     <Project Path="src/ClaudeSoundtrack.Core/ClaudeSoundtrack.Core.csproj" />
+    <Project Path="src/ClaudeSoundtrack.Sample/ClaudeSoundtrack.Sample.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ClaudeSoundtrack.Core.Tests/ClaudeSoundtrack.Core.Tests.csproj" />

@@ -1,3 +1,4 @@
+using ClaudeSoundtrack.Core.Models;
 using ClaudeSoundtrack.Core.Services;
 
 namespace ClaudeSoundtrack.App.ViewModels;
@@ -27,8 +28,15 @@ public sealed class MatchRow
     public string Source => Match.Source;
     public string YearText => Match.Year?.ToString() ?? "-";
 
-    /// <summary>VERIFIED when this release has a disc matching the one in the drive.</summary>
-    public string StatusText => Match.IsTocVerified ? "VERIFIED" : "unverified";
+    /// <summary>How this release was checked against the disc in the drive.</summary>
+    public string StatusText => Match.MatchKind switch
+    {
+        DiscMatchKind.DiscId => "DISC ID",
+        DiscMatchKind.Duration => "DURATIONS",
+        DiscMatchKind.TrackCount => "COUNT",
+        DiscMatchKind.Ambiguous => "AMBIGUOUS",
+        _ => Match.IsTocVerified ? "VERIFIED" : "unverified"
+    };
 
     /// <summary>
     /// Track count for the matched disc, with the disc's own count when they

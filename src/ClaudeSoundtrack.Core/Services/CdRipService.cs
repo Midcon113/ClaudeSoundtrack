@@ -1,3 +1,5 @@
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using ClaudeSoundtrack.Core.Models;
 using CUETools.Codecs;
 using CUETools.Codecs.FLAKE;
@@ -40,6 +42,13 @@ public readonly record struct RipTrackProgress(
 /// </summary>
 public sealed class CdRipService
 {
+    /// <summary>
+    /// When true, checksums are looked up in the AccurateRip database and any
+    /// track the database does not confirm is read a second time. Tests turn
+    /// this off so they do not touch the network.
+    /// </summary>
+    public bool QueryAccurateRip { get; set; } = true;
+
     /// <summary>A CD sector holds 2352 bytes = 588 stereo 16-bit sample frames.</summary>
     private const int BytesPerSector = 2352;
 
@@ -123,7 +132,41 @@ public sealed class CdRipService
                 drive = corrected;
             }
 
-            var toc = await drive.ReadTocAsync(cancellationToken).ConfigureAwait(false);
+            await RipTracksAsync(drive, tracks, outputFolder, fileNames, progress, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            // Dispose only the outermost handle; the wrapper owns the inner drive.
+            if (wrapper is not null) wrapper.Dispose();
+            else if (raw is IDisposable disposable) disposable.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Rips <paramref name="tracks"/> from an already-open drive. Tests pass a
+    /// stand-in here; the app uses the <see cref="string"/> overload, which also
+    /// applies the drive's read offset.
+    /// </summary>
+    public async Task RipTracksAsync(
+        IOpticalDrive drive,
+        IReadOnlyList<SoundtrackTrack> tracks,
+        string outputFolder,
+        IReadOnlyList<string> fileNames,
+        IProgress<RipTrackProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(drive);
+        ArgumentNullException.ThrowIfNull(tracks);
+        ArgumentNullException.ThrowIfNull(fileNames);
+        if (fileNames.Count != tracks.Count)
+            throw new ArgumentException("A file name must be supplied for every track.", nameof(fileNames));
+
+        Directory.CreateDirectory(outputFolder);
+
+        var toc = await drive.ReadTocAsync(cancellationToken).ConfigureAwait(false);
+            var audioTracks = toc.Tracks.Where(t => t.Type != TrackType.Data).OrderBy(t => t.Number).ToList();
+            var fingerprints = new List<(SoundtrackTrack Track, TrackInfo Toc, byte[] Sha256)>();
 
             for (var i = 0; i < tracks.Count; i++)
             {
@@ -134,23 +177,21 @@ public sealed class CdRipService
 
                 if (tocTrack.Number != track.SourceTrackNumber)
                     throw new InvalidOperationException(
-                        $"Track {track.SourceTrackNumber} is not present on the disc in {devicePath}.");
+                        $"Track {track.SourceTrackNumber} is not present on the disc.");
 
                 // Data tracks (CD-Extra, enhanced CDs) are not audio and must be skipped.
                 if (tocTrack.Type == TrackType.Data) continue;
 
                 var destination = Path.Combine(outputFolder, fileNames[i]);
-                await RipSingleTrackAsync(
-                        drive, tocTrack, track, destination, i, tracks.Count, progress, cancellationToken)
+                var sha = await RipSingleTrackAsync(
+                        drive, tocTrack, track, destination, i, tracks.Count, audioTracks.Count,
+                        progress, cancellationToken)
                     .ConfigureAwait(false);
+                fingerprints.Add((track, tocTrack, sha));
             }
-        }
-        finally
-        {
-            // Dispose only the outermost handle; the wrapper owns the inner drive.
-            if (wrapper is not null) wrapper.Dispose();
-            else if (raw is IDisposable disposable) disposable.Dispose();
-        }
+
+            await ConfirmReadsAsync(drive, toc, audioTracks.Count, fingerprints, progress, cancellationToken)
+                .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -170,13 +211,15 @@ public sealed class CdRipService
     }
 
     /// <summary>Rips one track: read sectors in chunks, encode each chunk as it arrives.</summary>
-    private static async Task RipSingleTrackAsync(
+    /// <returns>SHA-256 of the audio bytes that were encoded, for the second read.</returns>
+    private static async Task<byte[]> RipSingleTrackAsync(
         IOpticalDrive drive,
         TrackInfo tocTrack,
         SoundtrackTrack track,
         string destination,
         int trackIndex,
         int trackCount,
+        int audioTrackCount,
         IProgress<RipTrackProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -188,6 +231,8 @@ public sealed class CdRipService
         var totalSectors = tocTrack.SectorCount;
         var hadErrors = false;
         long nonZeroBytes = 0;
+        var checksum = new AccurateRipChecksum.State(tocTrack.Number, audioTrackCount, totalSectors * CdConstants.SampleFramesPerSector);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 
         FlakeWriter? writer = null;
         try
@@ -218,6 +263,8 @@ public sealed class CdRipService
                 // Count real audio so a silent rip can be detected rather than
                 // shipped. This is cheap next to the cost of the read itself.
                 var byteCount = want * BytesPerSector;
+                checksum.Update(buffer.AsSpan(0, byteCount));
+                hash.AppendData(buffer, 0, byteCount);
                 for (var i = 0; i < byteCount; i++)
                 {
                     if (buffer[i] != 0) nonZeroBytes++;
@@ -249,11 +296,16 @@ public sealed class CdRipService
             track.HadReadErrors = hadErrors;
             track.Duration = TimeSpan.FromSeconds((double)totalSectors / CdConstants.SectorsPerSecond);
             track.IsSilent = nonZeroBytes == 0 && totalSectors > 0;
+            track.AccurateRipCrc = checksum.V1;
+            track.AccurateRipV2Crc = checksum.V2;
+            track.CheckedAgainstDisc = true;
 
             // Exactly one completion report per track, so callers can log on it
             // without having to de-duplicate.
             progress?.Report(new RipTrackProgress(
                 track.SourceTrackNumber, track.Title, trackIndex, trackCount, 100, hadErrors, IsComplete: true));
+
+            return hash.GetHashAndReset();
         }
         catch
         {
@@ -268,6 +320,111 @@ public sealed class CdRipService
         {
             writer?.Close();
         }
+    }
+
+    /// <summary>
+    /// Confirms each track. An AccurateRip hit is enough. Anything else is read
+    /// again and compared with the first read's SHA-256. A limited soundtrack
+    /// pressing is usually absent from AccurateRip, so the second read is the
+    /// check that actually runs.
+    /// </summary>
+    private async Task ConfirmReadsAsync(
+        IOpticalDrive drive,
+        TableOfContents toc,
+        int audioTrackCount,
+        List<(SoundtrackTrack Track, TrackInfo Toc, byte[] Sha256)> fingerprints,
+        IProgress<RipTrackProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (fingerprints.Count == 0) return;
+
+        AccurateRipPressing? pressing = null;
+        var databaseKnowsDisc = false;
+        if (QueryAccurateRip)
+        {
+            try
+            {
+                var ids = DiscFingerprint.Compute(toc);
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
+                http.DefaultRequestHeaders.UserAgent.ParseAdd(
+                    "ClaudeSoundtrack/1.0 (+https://github.com/Midcon113/ClaudeSoundtrack)");
+                var records = await AccurateRipDatabase.LookupAsync(
+                    http, ids.AccurateRipId1, ids.AccurateRipId2, ids.FreedbDiscId, audioTrackCount, cancellationToken)
+                    .ConfigureAwait(false);
+                databaseKnowsDisc = records.Count > 0;
+
+                // The database is for the whole disc. A partial rip (one track
+                // retried) cannot be matched track-for-track against it.
+                if (fingerprints.Count == audioTrackCount)
+                {
+                    var checksums = fingerprints
+                        .OrderBy(f => f.Toc.Number)
+                        .Select(f => (f.Track.AccurateRipCrc ?? 0, f.Track.AccurateRipV2Crc ?? 0))
+                        .ToList();
+                    pressing = AccurateRipDatabase.BestMatch(records, checksums);
+                }
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException)
+            {
+                pressing = null;
+            }
+        }
+
+        for (var i = 0; i < fingerprints.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var (track, tocTrack, sha) = fingerprints[i];
+
+            var arIndex = tocTrack.Number - 1;
+            var arHit = pressing is not null
+                        && arIndex >= 0 && arIndex < pressing.TrackCount
+                        && (track.AccurateRipCrc == pressing.CrcV1[arIndex]
+                            || track.AccurateRipV2Crc == pressing.CrcV2[arIndex]);
+
+            if (arHit)
+            {
+                track.Confidence = RipConfidence.AccurateRip;
+                track.AccurateRipDisagreed = false;
+                continue;
+            }
+
+            if (databaseKnowsDisc)
+                track.AccurateRipDisagreed = true;
+
+            progress?.Report(new RipTrackProgress(
+                track.SourceTrackNumber, track.Title, i, fingerprints.Count, 0, track.HadReadErrors, IsComplete: false));
+
+            var second = await HashTrackAsync(drive, tocTrack, cancellationToken).ConfigureAwait(false);
+            var match = second.AsSpan().SequenceEqual(sha);
+            track.Confidence = match ? RipConfidence.Repeatable : RipConfidence.Unstable;
+            if (!match) track.HadReadErrors = true;
+
+            progress?.Report(new RipTrackProgress(
+                track.SourceTrackNumber, track.Title, i, fingerprints.Count, 100, track.HadReadErrors, IsComplete: false));
+        }
+    }
+
+    /// <summary>Reads a track again and returns the SHA-256 of the audio bytes.</summary>
+    private static async Task<byte[]> HashTrackAsync(
+        IOpticalDrive drive, TrackInfo tocTrack, CancellationToken cancellationToken)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[SectorsPerRead * BytesPerSector];
+        long sectorsDone = 0;
+        var total = tocTrack.SectorCount;
+
+        while (sectorsDone < total)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var want = (int)Math.Min(SectorsPerRead, total - sectorsDone);
+            var result = await ReadChunkAsync(drive, tocTrack.StartLba + sectorsDone, want, buffer, cancellationToken)
+                .ConfigureAwait(false);
+            hash.AppendData(buffer, 0, want * BytesPerSector);
+            sectorsDone += want;
+            _ = result;
+        }
+
+        return hash.GetHashAndReset();
     }
 
     /// <summary>Outcome of reading one chunk of sectors.</summary>

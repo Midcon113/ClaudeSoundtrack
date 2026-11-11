@@ -48,8 +48,11 @@ public partial class MainWindow : PanelWindow
     private CancellationTokenSource? _ripCancellation;
     private Stage _stage = Stage.Disc;
 
-    /// <summary>Which physical disc is being ripped next. Increments after each disc.</summary>
+    /// <summary>Which physical disc is being ripped. Set from the disc itself, not from how many have been inserted.</summary>
     private int _currentDiscNumber = 1;
+
+    /// <summary>A line to put in the rip log after it is cleared for the next disc.</summary>
+    private string? _pendingDiscNote;
 
     public MainWindow()
     {
@@ -262,6 +265,10 @@ public partial class MainWindow : PanelWindow
         AlbumTitleBox.Text = string.Empty;
         AlbumArtistBox.Text = string.Empty;
         YearBox.Text = string.Empty;
+        DiscBox.Text = string.Empty;
+        AlbumTitleBox.IsReadOnly = false;
+        AlbumArtistBox.IsReadOnly = false;
+        YearBox.IsReadOnly = false;
         SearchBox.Text = string.Empty;
         DiscReadoutText.Text = "Awaiting disc...";
         RipLogText.Text = string.Empty;
@@ -404,12 +411,14 @@ public partial class MainWindow : PanelWindow
         }
 
         CollectedTracksText.Text = _project.Tracks.Count == 1 ? "1 track" : $"{_project.Tracks.Count} tracks";
-        CollectedDiscsText.Text = _project.RippedDiscs.Count switch
-        {
-            0 => "no discs ripped",
-            1 => "1 disc ripped",
-            var n => $"{n} discs ripped"
-        };
+        CollectedDiscsText.Text = _project.DiscCount > 1
+            ? $"{_project.RippedDiscs.Count} of {_project.DiscCount} discs ripped"
+            : _project.RippedDiscs.Count switch
+            {
+                0 => "no discs ripped",
+                1 => "1 disc ripped",
+                var n => $"{n} discs ripped"
+            };
 
         OutputFolderButton.IsEnabled = !string.IsNullOrEmpty(_project.OutputFolder)
                                        && Directory.Exists(_project.OutputFolder);
@@ -562,7 +571,7 @@ public partial class MainWindow : PanelWindow
 
         try
         {
-            var results = await _lookup.LookupAsync(_disc, hint);
+            var results = await _lookup.LookupAsync(_disc, hint, _project.ReleaseId);
 
             foreach (var match in results) _matches.Add(new MatchRow(match, discTrackCount));
 
@@ -634,13 +643,36 @@ public partial class MainWindow : PanelWindow
 
         _selectedMatch = row.Match;
 
-        AlbumTitleBox.Text = row.Match.Title;
-        AlbumArtistBox.Text = row.Match.Artist;
-        YearBox.Text = row.Match.Year?.ToString() ?? string.Empty;
+        // Disc 2 must not rename the album. The match is only a source of titles
+        // and of which physical disc this is.
+        if (!_project.IdentityLocked)
+        {
+            AlbumTitleBox.Text = row.Match.Title;
+            AlbumArtistBox.Text = row.Match.Artist;
+            YearBox.Text = row.Match.Year?.ToString() ?? string.Empty;
+        }
+        else
+        {
+            AlbumAssembler.AdoptStructure(_project, row.Match);
+        }
 
-        SetStatus(row.Match.IsTocVerified
-            ? $"\"{row.Match.Title}\" matches this disc's track count."
-            : $"\"{row.Match.Title}\" was not verified against this disc - check the track count carefully.");
+        if (row.Match.DiscNumber > 0)
+            DiscBox.Text = row.Match.DiscNumber.ToString();
+
+        var how = row.Match.MatchKind switch
+        {
+            DiscMatchKind.DiscId => "MusicBrainz disc ID",
+            DiscMatchKind.Duration => "track lengths",
+            DiscMatchKind.TrackCount => "a unique track count",
+            DiscMatchKind.Ambiguous => "nothing conclusive — two discs fit, so pick the disc number",
+            _ => "text only"
+        };
+
+        SetStatus(_project.IdentityLocked
+            ? $"Album stays \"{_project.AlbumTitle}\". This disc was matched by {how}."
+            : row.Match.IsTocVerified
+                ? $"\"{row.Match.Title}\" matches this disc by {how}."
+                : $"\"{row.Match.Title}\" was not verified against this disc ({how}).");
     }
 
     // ================= Step 2: rip =================
@@ -660,16 +692,30 @@ public partial class MainWindow : PanelWindow
             return;
         }
 
-        // Album fields are locked in from the boxes, not the match, so hand edits count.
-        _project.AlbumTitle = AlbumTitleBox.Text.Trim();
-        _project.AlbumArtist = AlbumArtistBox.Text.Trim();
-        _project.Year = int.TryParse(YearBox.Text?.Trim(), out var year) && year > 0 ? year : null;
-
-        if (_selectedMatch is not null)
+        if (string.IsNullOrWhiteSpace(AlbumArtistBox.Text))
         {
-            _project.Label ??= _selectedMatch.Label;
-            _project.CatalogNumber ??= _selectedMatch.CatalogNumber;
+            MessageBox.Show(this,
+                "The album needs an album artist.\n\nYouTube Music files tracks with different artists as different albums, so every disc of this set has to share one.",
+                "ClaudeSoundtrack", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
         }
+
+        // The first rip commits the name. Later discs keep it, even when the
+        // match list is showing a different release title.
+        if (!_project.IdentityLocked)
+        {
+            var year = int.TryParse(YearBox.Text?.Trim(), out var parsed) && parsed > 0 ? parsed : (int?)null;
+            AlbumAssembler.LockIdentity(_project, AlbumTitleBox.Text, AlbumArtistBox.Text, year, _selectedMatch);
+            AlbumTitleBox.IsReadOnly = true;
+            AlbumArtistBox.IsReadOnly = true;
+            YearBox.IsReadOnly = true;
+        }
+        else if (_selectedMatch is not null)
+        {
+            AlbumAssembler.AdoptStructure(_project, _selectedMatch);
+        }
+
+        _currentDiscNumber = ResolveDiscNumber();
 
         if (!EnsureOutputFolder()) return;
 
@@ -733,8 +779,15 @@ public partial class MainWindow : PanelWindow
     {
         if (_disc?.Toc is null || DriveCombo.SelectedItem is not ComboBoxItem { Tag: string devicePath }) return;
 
-        RipHeadingText.Text = $"Ripping disc {_currentDiscNumber}";
+        RipHeadingText.Text = _project.DiscCount > 1
+            ? $"Ripping disc {_currentDiscNumber} of {_project.DiscCount}"
+            : $"Ripping disc {_currentDiscNumber}";
         RipLogText.Text = string.Empty;
+        if (_pendingDiscNote is not null)
+        {
+            AppendRipLog(_pendingDiscNote);
+            _pendingDiscNote = null;
+        }
         CancelRipButton.IsEnabled = true;
         NextDiscButton.Visibility = Visibility.Collapsed;
         ToArtworkButton.Visibility = Visibility.Collapsed;
@@ -779,14 +832,21 @@ public partial class MainWindow : PanelWindow
                 token);
 
             _project.RippedDiscs.Add(_currentDiscNumber);
-            _project.DiscCount = _project.RippedDiscs.Count;
 
             var errored = newTracks.Count(t => t.HadReadErrors);
+            var unstable = newTracks.Count(t => t.Confidence == RipConfidence.Unstable);
+            var accurate = newTracks.Count(t => t.Confidence == RipConfidence.AccurateRip);
+            var repeatable = newTracks.Count(t => t.Confidence == RipConfidence.Repeatable);
             AppendRipLog(errored == 0
                 ? $"Disc {_currentDiscNumber} complete, no read errors."
                 : $"Disc {_currentDiscNumber} complete, {errored} track(s) had read errors.");
+            if (accurate > 0) AppendRipLog($"{accurate} track(s) matched AccurateRip.");
+            if (repeatable > 0) AppendRipLog($"{repeatable} track(s) matched a second read (not in AccurateRip, or it disagreed).");
+            if (unstable > 0) AppendRipLog($"{unstable} track(s) read differently the second time — re-rip this disc before uploading.");
 
-            RipSubText.Text = $"Disc {_currentDiscNumber} is done. Insert the next disc, or continue to artwork.";
+            var next = AlbumAssembler.DescribeNextDisc(_project);
+            RipSubText.Text = $"Disc {_currentDiscNumber} is done. {next}, or continue to artwork.";
+            NextDiscButton.Content = next;
             NextDiscButton.Visibility = Visibility.Visible;
             ToArtworkButton.Visibility = Visibility.Visible;
             CancelRipButton.IsEnabled = false;
@@ -819,49 +879,56 @@ public partial class MainWindow : PanelWindow
     }
 
     /// <summary>
-    /// Builds the track list for the disc in the drive, taking titles from the
-    /// selected release where it has them and falling back to CD-Text, then to a
-    /// placeholder the user can fix in the manual editor.
+    /// Which disc this TOC is. A number typed in the disc box wins, then a
+    /// confident match against the locked release, then the match's own disc
+    /// number. The insertion counter is only the last resort.
+    /// </summary>
+    private int ResolveDiscNumber()
+    {
+        if (int.TryParse(DiscBox.Text?.Trim(), out var typed) && typed > 0)
+            return typed;
+
+        if (_disc is not null)
+        {
+            var id = DiscIdentifier.Identify(MetadataLookupService.DiscSnapshotFrom(_disc), _project.Media);
+            if (id.IsConfident && id.DiscNumber is int detected) return detected;
+        }
+
+        if (_selectedMatch is { IsTocVerified: true, DiscNumber: > 0 })
+            return _selectedMatch.DiscNumber;
+
+        return _currentDiscNumber > 0 ? _currentDiscNumber : 1;
+    }
+
+    /// <summary>
+    /// Builds the track list for the disc in the drive.
+    ///
+    /// Titles come from the locked release's copy of this disc number, then from
+    /// the selected match, then from CD-Text. They are used only when the list
+    /// is the same length as the disc.
     /// </summary>
     private List<SoundtrackTrack> BuildTracksForCurrentDisc()
     {
-        var tracks = new List<SoundtrackTrack>();
-        if (_disc?.Toc?.Tracks is null) return tracks;
+        if (_disc?.Toc?.Tracks is null) return [];
 
-        var audioTracks = _disc.Toc.Tracks.Where(t => t.Type != TrackType.Data).OrderBy(t => t.Number).ToList();
+        var sectors = _disc.Toc.Tracks
+            .Where(t => t.Type != TrackType.Data)
+            .OrderBy(t => t.Number)
+            .Select(t => t.SectorCount)
+            .ToList();
 
-        // A multi-disc release supplies titles per disc; use the disc we are on.
-        var titles = _selectedMatch?.TitlesForDisc(
-            _selectedMatch.TracksByDisc.Count > 1 ? _currentDiscNumber : _selectedMatch.DiscNumber) ?? [];
-
-        // Only trust the title list when it covers this disc exactly. A partial
-        // list would silently pair titles with the wrong tracks.
-        var titlesUsable = titles.Count == audioTracks.Count;
-
-        for (var i = 0; i < audioTracks.Count; i++)
+        var titles = AlbumAssembler.TitlesFor(_project, _currentDiscNumber, _selectedMatch);
+        if (titles.Count != sectors.Count)
         {
-            var tocTrack = audioTracks[i];
-
-            var title = titlesUsable
-                ? titles[i]
-                : _disc.CdText?.Tracks?.FirstOrDefault(t => t.Number == tocTrack.Number)?.Title;
-
-            if (string.IsNullOrWhiteSpace(title)) title = $"Track {tocTrack.Number}";
-
-            tracks.Add(new SoundtrackTrack
-            {
-                SourceDiscNumber = _currentDiscNumber,
-                SourceTrackNumber = tocTrack.Number,
-                // Strip any numbering the source baked into the title.
-                Title = FileNaming.StripLeadingTrackNumber(title),
-                Artist = _project.AlbumArtist,
-                Composer = _project.AlbumArtist,
-                SectorCount = tocTrack.SectorCount,
-                Duration = TimeSpan.FromSeconds((double)tocTrack.SectorCount / CdConstants.SectorsPerSecond)
-            });
+            titles = _disc.CdText?.Tracks?
+                .OrderBy(t => t.Number)
+                .Select(t => t.Title)
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Select(t => t!)
+                .ToList() ?? [];
         }
 
-        return tracks;
+        return AlbumAssembler.BuildTracks(_currentDiscNumber, sectors, titles, _project.AlbumArtist);
     }
 
     private void OnRipProgress(RipTrackProgress progress)
@@ -898,30 +965,80 @@ public partial class MainWindow : PanelWindow
 
     private async void NextDiscButton_Click(object sender, RoutedEventArgs e)
     {
-        _currentDiscNumber = _project.RippedDiscs.Count + 1;
-
+        var prompt = AlbumAssembler.DescribeNextDisc(_project);
         MessageBox.Show(this,
-            $"Insert disc {_currentDiscNumber} and click OK once the drive has settled.",
+            $"{prompt}\n\nClick OK once the drive has settled.",
             "ClaudeSoundtrack", MessageBoxButton.OK, MessageBoxImage.Information);
 
+        await ReadNextDiscAsync();
+    }
+
+    /// <summary>
+    /// Reads the disc now in the drive, recognises which disc of the set it is,
+    /// and rips it immediately when that is unambiguous.
+    /// </summary>
+    private async Task ReadNextDiscAsync()
+    {
         if (DriveCombo.SelectedItem is not ComboBoxItem { Tag: string devicePath }) return;
 
-        SetStatus($"Reading disc {_currentDiscNumber}...");
+        var prompt = AlbumAssembler.DescribeNextDisc(_project);
+        SetStatus($"{prompt} — reading the disc...");
 
         try
         {
             _disc = await _drives.ReadDiscInfoAsync(devicePath);
-            ShowDiscReadout(_disc);
+            var snapshot = MetadataLookupService.DiscSnapshotFrom(_disc);
+            var identified = DiscIdentifier.Identify(snapshot, _project.Media);
 
-            // Re-look-up so a set catalogued as separate releases still resolves,
-            // but keep the album fields the user already settled on.
+            if (identified.IsConfident && identified.DiscNumber is int known)
+            {
+                if (_project.RippedDiscs.Contains(known))
+                {
+                    ShowDiscReadout(_disc);
+                    var again = AlbumAssembler.DescribeNextDisc(_project);
+                    SetStatus($"That is disc {known}, which is already ripped. {again}.");
+                    MessageBox.Show(this,
+                        $"That is disc {known} of {_project.DiscCount}, and it is already ripped.\n\n{again}.",
+                        "ClaudeSoundtrack", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                _currentDiscNumber = known;
+                DiscBox.Text = known.ToString();
+                ShowDiscReadout(_disc);
+                _pendingDiscNote = $"Detected disc {known}" +
+                                   (_project.DiscCount > 1 ? $" of {_project.DiscCount}" : "") +
+                                   $" ({identified.Detail})";
+                GoToStage(Stage.Rip);
+                await RipCurrentDiscAsync();
+                return;
+            }
+
+            // Not sure which disc. Look it up, without letting the result rename
+            // the album, and let the user confirm the disc number.
+            DiscBox.Text = string.Empty;
+            ShowDiscReadout(_disc);
             GoToStage(Stage.Identify);
             await LookupAsync();
-            SetStatus($"Disc {_currentDiscNumber} read. Confirm the release and start the rip.");
+
+            if (_disc is not null && _selectedMatch is not null)
+            {
+                var afterLookup = DiscIdentifier.Identify(snapshot, _selectedMatch.Media);
+                if (!afterLookup.IsConfident)
+                    afterLookup = DiscIdentifier.Identify(snapshot, _project.Media);
+                if (afterLookup.IsConfident && afterLookup.DiscNumber is int n)
+                {
+                    DiscBox.Text = n.ToString();
+                    SetStatus($"This looks like disc {n}. Press Start Rip, or change the disc number if it is wrong.");
+                    return;
+                }
+            }
+
+            SetStatus($"{prompt}. This disc was not recognised automatically — set the disc number and press Start Rip.");
         }
         catch (Exception ex)
         {
-            SetStatus($"Could not read disc {_currentDiscNumber}: {ex.Message}");
+            SetStatus($"Could not read the next disc: {ex.Message}");
             GoToStage(Stage.Disc);
         }
     }
@@ -934,6 +1051,18 @@ public partial class MainWindow : PanelWindow
             return;
         }
 
+        if (_project.DiscCount > _project.RippedDiscs.Count)
+        {
+            var missing = Enumerable.Range(1, _project.DiscCount)
+                .Where(n => !_project.RippedDiscs.Contains(n))
+                .ToList();
+            var answer = MessageBox.Show(this,
+                $"Disc {string.Join(", ", missing)} of {_project.DiscCount} has not been ripped.\n\n" +
+                "Continue to artwork anyway? The upload will be missing those discs, and the track order cannot be fixed in YouTube Music afterwards.",
+                "ClaudeSoundtrack", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (answer != MessageBoxResult.Yes) return;
+        }
+
         GoToStage(Stage.Artwork);
         SetStatus("Choose the cover art for this album.");
     }
@@ -943,18 +1072,27 @@ public partial class MainWindow : PanelWindow
     private async void SearchArtworkButton_Click(object sender, RoutedEventArgs e)
     {
         SearchArtworkButton.IsEnabled = false;
-        SetStatus("Searching iTunes, Cover Art Archive and Discogs...");
+        SetStatus("Searching Cover Art Archive, then Discogs, then iTunes...");
 
         try
         {
             using var artwork = new ArtworkSearchService(_lookup.Discogs);
 
+            // Prefer the release locked on disc 1. The match selected while
+            // identifying a later disc must not swap in a different cover.
+            var musicBrainzId = _project.ReleaseSource == "MusicBrainz"
+                ? _project.ReleaseId
+                : _selectedMatch?.Source == "MusicBrainz" ? _selectedMatch.ReleaseId : null;
+            var discogsId = _project.ReleaseSource == "Discogs"
+                ? _project.ReleaseId
+                : _selectedMatch?.Source == "Discogs" ? _selectedMatch.ReleaseId : null;
+
             var candidates = await artwork.SearchAsync(
                 _project.AlbumTitle,
                 _project.AlbumArtist,
-                musicBrainzReleaseId: _selectedMatch?.Source == "MusicBrainz" ? _selectedMatch.ReleaseId : null,
-                musicBrainzReleaseGroupId: _selectedMatch?.ReleaseGroupId,
-                discogsReleaseId: _selectedMatch?.Source == "Discogs" ? _selectedMatch.ReleaseId : null);
+                musicBrainzReleaseId: musicBrainzId,
+                musicBrainzReleaseGroupId: _project.ReleaseGroupId ?? _selectedMatch?.ReleaseGroupId,
+                discogsReleaseId: discogsId);
 
             if (candidates.Count == 0)
             {

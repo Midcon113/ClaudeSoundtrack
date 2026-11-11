@@ -6,9 +6,10 @@ namespace ClaudeSoundtrack.Core.Services;
 /// <summary>
 /// Writes Vorbis comments and embedded cover art into the ripped FLAC files.
 ///
-/// This is where flattening actually takes effect on disk. Every file is written
-/// as disc 1 of 1 with its flattened track number, because that is what makes
-/// YouTube Music treat a multi-disc set as one album.
+/// Flattening shows up here as a continuous TRACKNUMBER. DISCNUMBER is the real
+/// disc, written as a plain integer — never "1/2" — and the album title, album
+/// artist and artist are the same string on every file. The same picture bytes
+/// are embedded in each one. See <see cref="YouTubeMusicTags"/>.
 /// </summary>
 public sealed class TaggingService
 {
@@ -33,6 +34,7 @@ public sealed class TaggingService
             progress?.Report((i + 1, targets.Count));
         }
 
+        if (written > 0) WriteFolderArt(project);
         return written;
     }
 
@@ -49,26 +51,40 @@ public sealed class TaggingService
 
         var file = new Track(track.FilePath);
 
+        var album = YouTubeMusicTags.Normalize(project.AlbumTitle);
+        var albumArtist = YouTubeMusicTags.Normalize(project.AlbumArtist);
+        var credit = YouTubeMusicTags.Normalize(track.Artist);
+
         // Strip a track number out of the title even at this late stage. Some
         // sources hand back "01 - Main Titles" as the title, and letting that
         // reach the tag would show the number twice in every player.
         file.Title = FileNaming.StripLeadingTrackNumber(track.Title);
 
-        file.Album = project.AlbumTitle;
-        file.AlbumArtist = project.AlbumArtist;
-        file.Artist = string.IsNullOrWhiteSpace(track.Artist) ? project.AlbumArtist : track.Artist;
-        file.Genre = project.Genre;
+        // ARTIST and ALBUMARTIST are the same value on every track. YouTube Music
+        // groups on those strings; a per-cue composer credit splits the album.
+        // The cue's own credit is kept as PERFORMER when it differs.
+        file.Album = album;
+        file.AlbumArtist = albumArtist;
+        file.Artist = albumArtist;
+        file.Genre = YouTubeMusicTags.Normalize(project.Genre);
 
-        if (!string.IsNullOrWhiteSpace(track.Composer)) file.Composer = track.Composer;
+        if (!string.IsNullOrWhiteSpace(track.Composer)) file.Composer = YouTubeMusicTags.Normalize(track.Composer);
         if (project.Year is > 0) file.Year = project.Year;
         if (!string.IsNullOrWhiteSpace(project.Label)) file.Publisher = project.Label;
         if (!string.IsNullOrWhiteSpace(project.CatalogNumber)) file.CatalogNumber = project.CatalogNumber;
 
-        // The whole point of flattening: continuous numbering, single disc.
         file.TrackNumber = track.FlatTrackNumber;
         file.TrackTotal = project.TotalTrackCount;
-        file.DiscNumber = 1;
-        file.DiscTotal = 1;
+        file.DiscNumber = track.SourceDiscNumber;
+        file.DiscTotal = YouTubeMusicTags.DiscTotal(project);
+
+        // ATL writes these as TRACKTOTAL and DISCTOTAL — plain integers in their
+        // own fields, which is the Vorbis shape. A second TOTALTRACKS tag for
+        // the same number makes ATL read the total back as 0, so it is not written.
+        if (credit.Length > 0 && !string.Equals(credit, albumArtist, StringComparison.Ordinal))
+            file.AdditionalFields["PERFORMER"] = credit;
+        else if (file.AdditionalFields.ContainsKey("PERFORMER"))
+            file.AdditionalFields.Remove("PERFORMER");
 
         if (project.CoverArt is { Length: > 0 })
         {
@@ -108,7 +124,37 @@ public sealed class TaggingService
             progress?.Report((i + 1, targets.Count));
         }
 
+        if (written > 0) WriteFolderArt(project);
         return written;
+    }
+
+    /// <summary>
+    /// Writes folder.jpg from the same bytes embedded in the tracks.
+    ///
+    /// YouTube Music rejects a loose image at upload time, so this is for the
+    /// local folder only. It is the same array the files were given, not a
+    /// re-encode, so the album cannot be split by two different covers.
+    /// </summary>
+    public static void WriteFolderArt(AlbumProject project)
+    {
+        if (project.CoverArt is not { Length: > 0 }) return;
+        if (string.IsNullOrEmpty(project.OutputFolder)) return;
+
+        var extension = ImageDimensions.DetectFormat(project.CoverArt) switch
+        {
+            ImageDimensions.Format.Png => ".png",
+            _ => ".jpg"
+        };
+
+        // Keep the name players look for, and drop a stale folder.jpg when the
+        // new art is a PNG (or the reverse).
+        foreach (var name in new[] { "folder.jpg", "folder.jpeg", "folder.png" })
+        {
+            var path = Path.Combine(project.OutputFolder, name);
+            if (File.Exists(path)) File.Delete(path);
+        }
+
+        File.WriteAllBytes(Path.Combine(project.OutputFolder, "folder" + extension), project.CoverArt);
     }
 
     /// <summary>

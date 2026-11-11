@@ -78,13 +78,26 @@ public sealed class ArtworkSearchService : IDisposable
         // claim "unknown" and the user could not tell them apart.
         await Task.WhenAll(candidates.Select(c => FetchAsync(c, cancellationToken))).ConfigureAwait(false);
 
+        // The correct cover beats the largest cover. iTunes often has a bigger
+        // image of a different edition of the same score; Cover Art Archive is
+        // the pressing MusicBrainz identified, so it stays first.
         return candidates
             .Where(c => c.ImageData is { Length: > 0 })
             .GroupBy(c => c.ImageData!.Length) // identical downloads from two sources
-            .Select(g => g.First())
-            .OrderByDescending(c => Math.Min(c.Width, c.Height))
+            .Select(g => g.OrderBy(SourceRank).First())
+            .OrderBy(SourceRank)
+            .ThenByDescending(c => Math.Min(c.Width, c.Height))
             .ToList();
     }
+
+    /// <summary>Lower is a more trustworthy source for this pressing.</summary>
+    private static int SourceRank(ArtworkCandidate candidate) => candidate.Source switch
+    {
+        "Cover Art Archive (this pressing)" => 0,
+        "Cover Art Archive" => 1,
+        "Discogs" => 2,
+        _ => 3
+    };
 
     /// <summary>
     /// Searches the iTunes Store, which needs no API key.
@@ -120,7 +133,7 @@ public sealed class ArtworkSearchService : IDisposable
 
                 results.Add(new ArtworkCandidate
                 {
-                    Source = "iTunes",
+                    Source = "iTunes (check the edition)",
                     ImageUrl = UpscaleITunesUrl(art),
                     ReleaseTitle = GetString(item, "collectionName"),
                     ReleaseYear = GetString(item, "releaseDate") is { Length: >= 4 } d ? d[..4] : null

@@ -1,4 +1,5 @@
-using System.Net.Http.Json;
+using System.Globalization;
+using System.Net;
 using System.Text.Json;
 using ClaudeSoundtrack.Core.Models;
 
@@ -46,10 +47,26 @@ public sealed record ReleaseMatch(
     /// </summary>
     public IReadOnlyList<IReadOnlyList<string>> TracksByDisc { get; init; } = [];
 
-    /// <summary>Titles for a given 1-based disc, falling back to the flat list.</summary>
+    /// <summary>Per-disc titles, lengths and disc ids. Empty when the source had no disc split.</summary>
+    public IReadOnlyList<DiscMedium> Media { get; init; } = [];
+
+    /// <summary>Why <see cref="IsTocVerified"/> is set, when it is.</summary>
+    public DiscMatchKind MatchKind { get; init; } = DiscMatchKind.None;
+
+    /// <summary>
+    /// Titles for one disc.
+    ///
+    /// A flat <see cref="TrackTitles"/> list belongs to <see cref="DiscNumber"/> only.
+    /// Handing it out for every disc is how disc 2 used to be tagged with disc 1's cues.
+    /// </summary>
     public IReadOnlyList<string> TitlesForDisc(int discNumber)
     {
-        if (TracksByDisc.Count == 0) return TrackTitles;
+        var medium = Media.FirstOrDefault(m => m.Number == discNumber);
+        if (medium is { Titles.Count: > 0 }) return medium.Titles;
+
+        if (TracksByDisc.Count == 0)
+            return discNumber == DiscNumber ? TrackTitles : [];
+
         var index = discNumber - 1;
         return index >= 0 && index < TracksByDisc.Count ? TracksByDisc[index] : [];
     }
@@ -67,11 +84,35 @@ public sealed record ReleaseMatch(
 public sealed class MusicBrainzClient
 {
     private const string BaseUrl = "https://musicbrainz.org/ws/2";
+
+    /// <summary>MusicBrainz asks for at most one request a second.</summary>
+    private static readonly SemaphoreSlim Gate = new(1, 1);
+    private static DateTimeOffset _nextRequest = DateTimeOffset.MinValue;
+
     private readonly HttpClient _http;
 
     public MusicBrainzClient(HttpClient http)
     {
         _http = http;
+    }
+
+    /// <summary>
+    /// Parses a disc-id (or TOC) response. Public so the multi-disc mapping can
+    /// be tested from a saved response, without calling MusicBrainz.
+    /// </summary>
+    public static IReadOnlyList<ReleaseMatch> ParseDiscIdResponse(string json, string? discId)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("releases", out var releases)) return [];
+
+        var matches = new List<ReleaseMatch>();
+        foreach (var release in releases.EnumerateArray())
+        {
+            var match = ParseRelease(release, discId);
+            if (match is not null) matches.Add(match);
+        }
+
+        return matches;
     }
 
     /// <summary>
@@ -85,28 +126,54 @@ public sealed class MusicBrainzClient
     {
         if (string.IsNullOrWhiteSpace(discId)) return [];
 
-        var url = $"{BaseUrl}/discid/{Uri.EscapeDataString(discId)}?inc=artist-credits+recordings+release-groups+labels&fmt=json";
+        var url = $"{BaseUrl}/discid/{Uri.EscapeDataString(discId)}?inc=artist-credits+recordings+release-groups+labels+discids&fmt=json";
+        return await GetMatchesAsync(url, discId, cancellationToken).ConfigureAwait(false);
+    }
 
+    /// <summary>
+    /// Looks up a table of contents when the exact disc ID is not in MusicBrainz.
+    ///
+    /// The same pressing is sometimes submitted under a slightly different rip,
+    /// and this is the lookup that still finds it. <paramref name="toc"/> is
+    /// <c>first+last+leadout+offset+offset...</c> in sectors, the form MusicBrainz documents.
+    /// </summary>
+    public async Task<IReadOnlyList<ReleaseMatch>> LookupByTocAsync(
+        string toc, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(toc)) return [];
+
+        var url = $"{BaseUrl}/discid/-?toc={Uri.EscapeDataString(toc)}&inc=artist-credits+recordings+release-groups+labels+discids&fmt=json";
+        return await GetMatchesAsync(url, discId: null, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Builds the <c>toc</c> query from track start sectors and the lead-out.
+    /// Offsets are the audio tracks only, in track order.
+    /// </summary>
+    public static string FormatToc(int firstTrack, int lastTrack, long leadOutLba, IReadOnlyList<long> trackStartLbas)
+    {
+        var parts = new List<string>
+        {
+            firstTrack.ToString(CultureInfo.InvariantCulture),
+            lastTrack.ToString(CultureInfo.InvariantCulture),
+            leadOutLba.ToString(CultureInfo.InvariantCulture)
+        };
+        parts.AddRange(trackStartLbas.Select(o => o.ToString(CultureInfo.InvariantCulture)));
+        return string.Join('+', parts);
+    }
+
+    private async Task<IReadOnlyList<ReleaseMatch>> GetMatchesAsync(
+        string url, string? discId, CancellationToken cancellationToken)
+    {
         try
         {
-            using var response = await _http.GetAsync(url, cancellationToken).ConfigureAwait(false);
+            using var response = await SendAsync(url, cancellationToken).ConfigureAwait(false);
 
             // 404 simply means nobody has submitted this pressing. Not an error.
-            if (!response.IsSuccessStatusCode) return [];
+            if (response.StatusCode == HttpStatusCode.NotFound || !response.IsSuccessStatusCode) return [];
 
-            using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
-
-            if (!doc.RootElement.TryGetProperty("releases", out var releases)) return [];
-
-            var matches = new List<ReleaseMatch>();
-            foreach (var release in releases.EnumerateArray())
-            {
-                var match = ParseRelease(release, discId);
-                if (match is not null) matches.Add(match);
-            }
-
-            return matches;
+            var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            return ParseDiscIdResponse(json, discId);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
@@ -114,26 +181,48 @@ public sealed class MusicBrainzClient
         }
     }
 
+    /// <summary>One MusicBrainz request at a time, at most one a second, with a single retry on 503.</summary>
+    private async Task<HttpResponseMessage> SendAsync(string url, CancellationToken cancellationToken)
+    {
+        await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var wait = _nextRequest - DateTimeOffset.UtcNow;
+            if (wait > TimeSpan.Zero)
+                await Task.Delay(wait, cancellationToken).ConfigureAwait(false);
+
+            _nextRequest = DateTimeOffset.UtcNow.AddMilliseconds(1100);
+            var response = await _http.GetAsync(url, cancellationToken).ConfigureAwait(false);
+            if ((int)response.StatusCode == 503)
+            {
+                response.Dispose();
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+                _nextRequest = DateTimeOffset.UtcNow.AddMilliseconds(1100);
+                response = await _http.GetAsync(url, cancellationToken).ConfigureAwait(false);
+            }
+
+            return response;
+        }
+        finally
+        {
+            Gate.Release();
+        }
+    }
+
     /// <summary>
     /// Turns one MusicBrainz release into a <see cref="ReleaseMatch"/>.
     ///
-    /// Only the medium carrying our disc ID is used for the track list; taking
-    /// the first medium of a 4-disc set would give the wrong titles entirely.
+    /// Every medium is kept. The disc in the drive is the medium whose disc list
+    /// contains <paramref name="discId"/>; the others stay available so the next
+    /// disc can be recognised without another search. Using only the first
+    /// medium of a box set is how disc 2 used to receive disc 1's titles.
     /// </summary>
-    private static ReleaseMatch? ParseRelease(JsonElement release, string discId)
+    private static ReleaseMatch? ParseRelease(JsonElement release, string? discId)
     {
         var title = GetString(release, "title");
         if (string.IsNullOrWhiteSpace(title)) return null;
 
-        var artist = "Unknown Artist";
-        if (release.TryGetProperty("artist-credit", out var credits) && credits.ValueKind == JsonValueKind.Array)
-        {
-            var names = credits.EnumerateArray()
-                .Select(c => GetString(c, "name"))
-                .Where(n => !string.IsNullOrWhiteSpace(n));
-            var joined = string.Join(", ", names);
-            if (!string.IsNullOrWhiteSpace(joined)) artist = joined;
-        }
+        var artist = JoinArtistCredit(release);
 
         int? year = null;
         var date = GetString(release, "date");
@@ -150,34 +239,58 @@ public sealed class MusicBrainzClient
             }
         }
 
-        var titles = new List<string>();
-        var discNumber = 1;
-        var discCount = 1;
+        var media = new List<DiscMedium>();
+        var matchedNumber = 0;
 
-        if (release.TryGetProperty("media", out var media) && media.ValueKind == JsonValueKind.Array)
+        if (release.TryGetProperty("media", out var mediaElement) && mediaElement.ValueKind == JsonValueKind.Array)
         {
-            var mediaList = media.EnumerateArray().ToList();
-            discCount = mediaList.Count == 0 ? 1 : mediaList.Count;
-
-            // Find the medium whose disc list contains our disc ID.
-            var index = mediaList.FindIndex(m =>
-                m.TryGetProperty("discs", out var discs) &&
-                discs.ValueKind == JsonValueKind.Array &&
-                discs.EnumerateArray().Any(d => GetString(d, "id") == discId));
-
-            if (index < 0) index = 0;
-            discNumber = index + 1;
-
-            if (mediaList.Count > index &&
-                mediaList[index].TryGetProperty("tracks", out var tracks) &&
-                tracks.ValueKind == JsonValueKind.Array)
+            var index = 0;
+            foreach (var medium in mediaElement.EnumerateArray())
             {
-                titles.AddRange(tracks.EnumerateArray()
-                    .Select(t => GetString(t, "title"))
-                    .Where(t => !string.IsNullOrWhiteSpace(t))
-                    .Select(t => t!));
+                index++;
+                var number = medium.TryGetProperty("position", out var position) && position.TryGetInt32(out var parsed) && parsed > 0
+                    ? parsed
+                    : index;
+
+                var titles = new List<string>();
+                var lengths = new List<int>();
+                if (medium.TryGetProperty("tracks", out var tracks) && tracks.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var track in tracks.EnumerateArray())
+                    {
+                        var trackTitle = GetString(track, "title");
+                        if (string.IsNullOrWhiteSpace(trackTitle)) continue;
+                        titles.Add(trackTitle);
+                        lengths.Add(track.TryGetProperty("length", out var length) && length.TryGetInt32(out var ms) ? ms : 0);
+                    }
+                }
+
+                string? mediumDiscId = null;
+                if (medium.TryGetProperty("discs", out var discs) && discs.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var disc in discs.EnumerateArray())
+                    {
+                        var id = GetString(disc, "id");
+                        if (string.IsNullOrWhiteSpace(id)) continue;
+                        mediumDiscId ??= id;
+                        if (!string.IsNullOrEmpty(discId) && string.Equals(id, discId, StringComparison.Ordinal))
+                            matchedNumber = number;
+                    }
+                }
+
+                media.Add(new DiscMedium(number, titles, lengths, mediumDiscId));
             }
         }
+
+        var discCount = media.Count == 0 ? 1 : media.Max(m => m.Number);
+        if (matchedNumber == 0) matchedNumber = media.Count > 0 ? media[0].Number : 1;
+
+        var matched = media.FirstOrDefault(m => m.Number == matchedNumber);
+        var titlesForMatched = matched?.Titles ?? [];
+        // A TOC lookup has no disc id to point at a medium. The caller verifies
+        // by length. A disc-id hit is exact only when a medium actually carried it.
+        var discIdHit = !string.IsNullOrEmpty(discId) && media.Any(m =>
+            string.Equals(m.DiscId, discId, StringComparison.Ordinal));
 
         string? releaseGroupId = null;
         if (release.TryGetProperty("release-group", out var rg)) releaseGroupId = GetString(rg, "id");
@@ -187,17 +300,41 @@ public sealed class MusicBrainzClient
             Title: title,
             Artist: artist,
             Year: year,
-            TrackTitles: titles,
-            DiscNumber: discNumber,
+            TrackTitles: titlesForMatched.ToList(),
+            DiscNumber: discIdHit ? matchedNumber : 0,
             DiscCount: discCount,
             Label: label,
             CatalogNumber: catalogNumber,
             ReleaseId: GetString(release, "id"),
-            // A disc ID hit is an exact TOC fingerprint match by construction.
-            IsTocVerified: true)
+            IsTocVerified: discIdHit)
         {
-            ReleaseGroupId = releaseGroupId
+            ReleaseGroupId = releaseGroupId,
+            TracksByDisc = media.OrderBy(m => m.Number).Select(m => m.Titles).ToList(),
+            Media = media,
+            MatchKind = discIdHit ? DiscMatchKind.DiscId : DiscMatchKind.None
         };
+    }
+
+    /// <summary>
+    /// Joins an artist-credit with MusicBrainz's own join phrases, so the album
+    /// artist is the same string every disc of the release produces.
+    /// </summary>
+    private static string JoinArtistCredit(JsonElement release)
+    {
+        if (!release.TryGetProperty("artist-credit", out var credits) || credits.ValueKind != JsonValueKind.Array)
+            return "Unknown Artist";
+
+        var sb = new System.Text.StringBuilder();
+        foreach (var credit in credits.EnumerateArray())
+        {
+            var name = GetString(credit, "name");
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            sb.Append(name);
+            sb.Append(GetString(credit, "joinphrase") ?? "");
+        }
+
+        var joined = YouTubeMusicTags.Normalize(sb.ToString());
+        return joined.Length == 0 ? "Unknown Artist" : joined;
     }
 
     private static string? GetString(JsonElement element, string property) =>
