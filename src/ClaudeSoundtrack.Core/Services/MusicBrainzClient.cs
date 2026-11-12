@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using ClaudeSoundtrack.Core.Models;
+using FoxRedbook;
 
 namespace ClaudeSoundtrack.Core.Services;
 
@@ -85,6 +86,11 @@ public sealed class MusicBrainzClient
 {
     private const string BaseUrl = "https://musicbrainz.org/ws/2";
 
+    /// <summary>
+    /// Includes the disc-id endpoint accepts. <c>discids</c> is deliberately absent.
+    /// </summary>
+    private const string Include = "artist-credits+recordings+release-groups+labels";
+
     /// <summary>MusicBrainz asks for at most one request a second.</summary>
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private static DateTimeOffset _nextRequest = DateTimeOffset.MinValue;
@@ -126,9 +132,19 @@ public sealed class MusicBrainzClient
     {
         if (string.IsNullOrWhiteSpace(discId)) return [];
 
-        var url = $"{BaseUrl}/discid/{Uri.EscapeDataString(discId)}?inc=artist-credits+recordings+release-groups+labels+discids&fmt=json";
-        return await GetMatchesAsync(url, discId, cancellationToken).ConfigureAwait(false);
+        return await GetMatchesAsync(DiscIdUrl(discId), discId, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// URL for an exact disc-id lookup.
+    ///
+    /// <c>discids</c> is not a legal include on this resource. MusicBrainz answers
+    /// 400, and a 400 used to be treated as "no such disc", so a release that
+    /// was in the database never appeared. The disc ids are already in the
+    /// response without asking for them.
+    /// </summary>
+    public static string DiscIdUrl(string discId) =>
+        $"{BaseUrl}/discid/{Uri.EscapeDataString(discId)}?inc={Include}&fmt=json";
 
     /// <summary>
     /// Looks up a table of contents when the exact disc ID is not in MusicBrainz.
@@ -142,13 +158,49 @@ public sealed class MusicBrainzClient
     {
         if (string.IsNullOrWhiteSpace(toc)) return [];
 
-        var url = $"{BaseUrl}/discid/-?toc={Uri.EscapeDataString(toc)}&inc=artist-credits+recordings+release-groups+labels+discids&fmt=json";
-        return await GetMatchesAsync(url, discId: null, cancellationToken).ConfigureAwait(false);
+        return await GetMatchesAsync(TocUrl(toc), discId: null, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Builds the <c>toc</c> query from track start sectors and the lead-out.
-    /// Offsets are the audio tracks only, in track order.
+    /// URL for a TOC lookup. <c>cdstubs=no</c> asks for a real release rather than
+    /// a stub. Offsets in <paramref name="toc"/> already include the 150-frame lead-in.
+    /// </summary>
+    public static string TocUrl(string toc) =>
+        $"{BaseUrl}/discid/-?toc={Uri.EscapeDataString(toc)}&cdstubs=no&inc={Include}&fmt=json";
+
+    /// <summary>The 150-frame pregap MusicBrainz counts and a drive LBA does not.</summary>
+    public const int PregapFrames = 150;
+
+    /// <summary>Sectors between the last audio track and a following data session.</summary>
+    public const int MultiSessionGap = 11400;
+
+    /// <summary>
+    /// Lead-out to send to MusicBrainz. A data track on an enhanced CD sits after
+    /// a session gap; the audio lead-out is the data track's start minus that gap.
+    /// </summary>
+    public static long AudioLeadOutLba(TableOfContents toc)
+    {
+        ArgumentNullException.ThrowIfNull(toc);
+        long dataStart = long.MaxValue;
+        var hasData = false;
+        foreach (var track in toc.Tracks)
+        {
+            if (track.Type == TrackType.Data && track.StartLba < dataStart)
+            {
+                dataStart = track.StartLba;
+                hasData = true;
+            }
+        }
+
+        return hasData ? dataStart - MultiSessionGap : toc.LeadOutLba;
+    }
+
+    /// <summary>
+    /// Builds the <c>toc</c> query from drive LBAs.
+    ///
+    /// The drive's first track starts at 0. MusicBrainz wants those positions
+    /// plus the 150-frame lead-in, which is the same adjustment FoxRedbook makes
+    /// when it computes a disc ID. Passing the raw LBAs looks up a different disc.
     /// </summary>
     public static string FormatToc(int firstTrack, int lastTrack, long leadOutLba, IReadOnlyList<long> trackStartLbas)
     {
@@ -156,9 +208,9 @@ public sealed class MusicBrainzClient
         {
             firstTrack.ToString(CultureInfo.InvariantCulture),
             lastTrack.ToString(CultureInfo.InvariantCulture),
-            leadOutLba.ToString(CultureInfo.InvariantCulture)
+            (leadOutLba + PregapFrames).ToString(CultureInfo.InvariantCulture)
         };
-        parts.AddRange(trackStartLbas.Select(o => o.ToString(CultureInfo.InvariantCulture)));
+        parts.AddRange(trackStartLbas.Select(o => (o + PregapFrames).ToString(CultureInfo.InvariantCulture)));
         return string.Join('+', parts);
     }
 

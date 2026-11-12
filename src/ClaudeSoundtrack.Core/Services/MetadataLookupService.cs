@@ -91,15 +91,14 @@ public sealed class MetadataLookupService : IDisposable
         // 2. MusicBrainz TOC lookup, when the exact id was never submitted.
         if (!results.Any(r => r.MatchKind == DiscMatchKind.DiscId) && disc.Toc is { } toc)
         {
-            var audioStarts = toc.Tracks
-                .Where(t => t.Type != TrackType.Data)
-                .OrderBy(t => t.Number)
-                .Select(t => t.StartLba)
-                .ToList();
-            if (audioStarts.Count > 0)
+            var audio = toc.Tracks.Where(t => t.Type != TrackType.Data).OrderBy(t => t.Number).ToList();
+            if (audio.Count > 0)
             {
                 var query = MusicBrainzClient.FormatToc(
-                    toc.FirstTrackNumber, toc.LastTrackNumber, toc.LeadOutLba, audioStarts);
+                    audio[0].Number,
+                    audio[^1].Number,
+                    MusicBrainzClient.AudioLeadOutLba(toc),
+                    audio.Select(t => t.StartLba).ToList());
                 var byToc = await _musicBrainz.LookupByTocAsync(query, cancellationToken).ConfigureAwait(false);
                 results.AddRange(byToc.Select(r => ApplyToc(r, snapshot)));
             }
@@ -275,19 +274,28 @@ public sealed class MetadataLookupService : IDisposable
 
         if (titles.Count == 0) return null;
 
+        // "The Rock - Disc 2" is disc 2 of The Rock, not an album titled that.
+        var cleaned = AlbumTitleCleaner.Parse(cdText.AlbumTitle);
+        var discNumber = cleaned.DiscNumber is > 0 ? cleaned.DiscNumber.Value : 1;
+        var discCount = Math.Max(cleaned.DiscCount ?? discNumber, discNumber);
+
         return new ReleaseMatch(
             Source: "CD-Text",
-            Title: cdText.AlbumTitle,
+            Title: cleaned.Title,
             Artist: string.IsNullOrWhiteSpace(cdText.AlbumPerformer) ? "Unknown Artist" : cdText.AlbumPerformer,
             Year: null,
             TrackTitles: titles,
-            DiscNumber: 1,
-            DiscCount: 1,
+            DiscNumber: discNumber,
+            DiscCount: discCount,
             Label: null,
             CatalogNumber: null,
             ReleaseId: null,
             // The text is physically on this disc, so it describes this disc.
-            IsTocVerified: titles.Count == CountAudioTracks(disc.Toc));
+            IsTocVerified: titles.Count == CountAudioTracks(disc.Toc))
+        {
+            Media = [new DiscMedium(discNumber, titles, Enumerable.Repeat(0, titles.Count).ToList(), null)],
+            MatchKind = cleaned.HadDiscSuffix ? DiscMatchKind.TrackCount : DiscMatchKind.None
+        };
     }
 
     /// <summary>

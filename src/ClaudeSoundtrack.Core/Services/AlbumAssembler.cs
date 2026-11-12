@@ -52,13 +52,72 @@ public static class AlbumAssembler
 
         if (!project.IdentityLocked)
         {
-            project.AlbumTitle = YouTubeMusicTags.Normalize(title);
-            project.AlbumArtist = YouTubeMusicTags.Normalize(artist);
-            project.Year = year is > 0 ? year : null;
-            project.IdentityLocked = true;
+            ApplyUserEdits(project, title, artist, year);
         }
 
         if (match is not null) AdoptStructure(project, match);
+    }
+
+    /// <summary>
+    /// Writes the title, artist and year the user is looking at.
+    ///
+    /// A disc suffix is removed first, so "The Rock - Disc 1" is stored as
+    /// "The Rock". Unlike <see cref="LockIdentity"/>, this applies even after
+    /// the album is locked, because the boxes stay editable.
+    /// </summary>
+    public static void ApplyUserEdits(AlbumProject project, string title, string artist, int? year)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+
+        var cleaned = AlbumTitleCleaner.Parse(title);
+        var album = YouTubeMusicTags.Normalize(cleaned.Title);
+        if (!string.IsNullOrEmpty(album)) project.AlbumTitle = album;
+
+        var credit = YouTubeMusicTags.Normalize(artist);
+        if (!string.IsNullOrEmpty(credit)) project.AlbumArtist = credit;
+
+        if (year is > 0) project.Year = year;
+        if (cleaned.DiscCount is int count && count > project.DiscCount) project.DiscCount = count;
+        project.IdentityLocked = true;
+    }
+
+    /// <summary>
+    /// Which disc a highlighted candidate is. A number in the candidate wins.
+    /// A "Disc 2" suffix on a CD-Text row wins over a medium numbered 1.
+    /// Otherwise it is the next disc that has not been ripped, and it is never
+    /// left on the disc that just finished.
+    /// </summary>
+    public static int ChooseDiscNumber(AlbumProject project, ReleaseMatch? match)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+
+        var chosen = match?.DiscNumber ?? 0;
+        if (match is not null)
+        {
+            var fromTitle = AlbumTitleCleaner.Parse(match.Title).DiscNumber;
+            if (fromTitle is > 0 && (chosen <= 0 || string.Equals(match.Source, "CD-Text", StringComparison.Ordinal)))
+                chosen = fromTitle.Value;
+        }
+
+        if (chosen <= 0) chosen = NextUnrippedDisc(project);
+
+        // Cap only when the release told us how many discs there are. A count
+        // of 1 means "we have not been told", and capping there would pin
+        // disc 2 back to disc 1.
+        if (project.DiscCount > 1 && chosen > project.DiscCount)
+            chosen = project.DiscCount;
+
+        return Math.Max(1, chosen);
+    }
+
+    /// <summary>"Disc 2 of 2 detected: The Rock".</summary>
+    public static string DescribeDetection(AlbumProject project, int discNumber)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        var title = string.IsNullOrWhiteSpace(project.AlbumTitle) ? "this album" : project.AlbumTitle;
+        return project.DiscCount > 1
+            ? $"Disc {discNumber} of {project.DiscCount} detected: {title}"
+            : $"Disc {discNumber} detected: {title}";
     }
 
     /// <summary>

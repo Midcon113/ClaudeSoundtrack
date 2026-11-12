@@ -257,8 +257,13 @@
                         </StackPanel>
 
                         <Grid Grid.Row="1" Margin="0,18,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBox x:Name="SearchBox" Style="{StaticResource PanelTextBox}"
@@ -267,6 +272,16 @@
                                     Style="{StaticResource BrassButton}"
                                     Margin="10,0,0,0" MinWidth="0" Padding="16,8"
                                     Click="SearchButton_Click" />
+                            <Button Grid.Column="2" x:Name="RepairButton" Content="Repair tags"
+                                    Style="{StaticResource BrassButton}"
+                                    Margin="10,0,0,0" MinWidth="0" Padding="16,8"
+                                    Click="RepairButton_Click" />
+                            <CheckBox x:Name="ShowAllMatchesCheck" Grid.Row="1" Grid.ColumnSpan="3"
+                                      Style="{StaticResource PanelCheckBox}"
+                                      Content="Show all results"
+                                      Margin="0,10,0,0"
+                                      Visibility="Collapsed"
+                                      Checked="ShowAllMatches_Changed" Unchecked="ShowAllMatches_Changed" />
                         </Grid>
 
                         <Border Grid.Row="2" Style="{StaticResource RecessedPanel}" Margin="0,14,0,0" Padding="4">
@@ -373,6 +388,10 @@
                                     Style="{StaticResource BrassButton}" Margin="0,0,10,0"
                                     Visibility="Collapsed"
                                     Click="NextDiscButton_Click" />
+                            <Button x:Name="RepairRippedButton" Content="Repair tags"
+                                    Style="{StaticResource BrassButton}" Margin="0,0,10,0"
+                                    Visibility="Collapsed"
+                                    Click="RepairButton_Click" />
                             <Button x:Name="ToArtworkButton" Content="Continue to Artwork"
                                     Style="{StaticResource AmberButton}"
                                     Visibility="Collapsed"
