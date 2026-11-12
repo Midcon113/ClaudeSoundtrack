@@ -30,8 +30,34 @@ public sealed class AlbumProject
     /// <summary>Catalogue number of the release, e.g. "LLLCD 1234".</summary>
     public string? CatalogNumber { get; set; }
 
-    /// <summary>How many physical discs the set contains.</summary>
+    /// <summary>
+    /// How many physical discs the release contains, from the catalogue match.
+    /// This is the set size ("disc 2 of 3"), not how many have been ripped so far.
+    /// </summary>
     public int DiscCount { get; set; } = 1;
+
+    /// <summary>
+    /// True once the album title, album artist and year have been committed.
+    /// Later discs must not change them: a different string on disc 2 is what
+    /// splits the upload into two albums, and what used to send disc 2 into a
+    /// different folder.
+    /// </summary>
+    public bool IdentityLocked { get; set; }
+
+    /// <summary>MusicBrainz or Discogs release id the set was identified as, when known.</summary>
+    public string? ReleaseId { get; set; }
+
+    /// <summary>MusicBrainz release group, for Cover Art Archive.</summary>
+    public string? ReleaseGroupId { get; set; }
+
+    /// <summary>Which service <see cref="ReleaseId"/> came from.</summary>
+    public string? ReleaseSource { get; set; }
+
+    /// <summary>
+    /// Every disc of the locked release: titles, lengths and disc id.
+    /// The next disc in the drive is matched against this, not against a counter.
+    /// </summary>
+    public List<DiscMedium> Media { get; } = new();
 
     /// <summary>Every track across every disc, in flattened order once flattening has run.</summary>
     public List<SoundtrackTrack> Tracks { get; } = new();

@@ -8,6 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="ClaudeSoundtrack.Core.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- CD-DA ripping: drive access, TOC, offset correction, AccurateRip CRCs. -->
     <PackageReference Include="FoxRedbook" Version="1.0.0-alpha.3" />
     <!-- Managed FLAC encoder (netstandard2.0), so there are no native binaries to ship. -->

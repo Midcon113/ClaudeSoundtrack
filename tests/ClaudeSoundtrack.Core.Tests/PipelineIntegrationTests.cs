@@ -135,14 +135,15 @@ public class PipelineIntegrationTests : IDisposable
         var project = BuildRippedProject();
         new TaggingService().WriteAllTags(project);
 
-        // Disc 2 track 1 must be track 4 of 5 on disc 1 of 1.
+        // Disc 2 track 1 is track 4 of 5, still marked as disc 2. The track
+        // numbers do not restart, and the disc number is a plain integer.
         var disc2First = project.Tracks.Single(t => t.SourceDiscNumber == 2 && t.SourceTrackNumber == 1);
         var file = new ATL.Track(disc2First.FilePath!);
 
         Assert.Equal(4, file.TrackNumber);
         Assert.Equal(5, file.TrackTotal);
-        Assert.Equal(1, file.DiscNumber);
-        Assert.Equal(1, file.DiscTotal);
+        Assert.Equal(2, file.DiscNumber);
+        Assert.Equal(2, file.DiscTotal);
     }
 
     [Fact]
@@ -233,13 +234,13 @@ public class PipelineIntegrationTests : IDisposable
         new TaggingService().WriteAllTags(project);
 
         var tampered = new ATL.Track(project.Tracks[0].FilePath!);
-        tampered.DiscNumber = 2;
+        tampered.DiscNumber = 3;
         tampered.Save();
 
         var report = new ReadinessChecker().Check(project);
 
         Assert.False(report.IsReady);
-        Assert.Contains(report.Issues, i => i.Message.Contains("disc 2"));
+        Assert.Contains(report.Issues, i => i.Message.Contains("disc 3"));
     }
 
     [Fact]

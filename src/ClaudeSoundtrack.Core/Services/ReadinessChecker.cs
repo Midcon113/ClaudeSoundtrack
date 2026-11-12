@@ -41,9 +41,9 @@ public sealed record ReadinessReport(IReadOnlyList<ReadinessIssue> Issues, int F
 /// Verifies an album is genuinely ready to upload, by reading the files on disk
 /// rather than trusting what the app thinks it wrote.
 ///
-/// The checks encode what YouTube Music actually needs to group an upload into a
-/// single coherent album: one album title, one album artist, contiguous track
-/// numbers from 1, a single disc, and embedded art on every file.
+/// The checks encode what a YouTube Music upload needs in order to land as one
+/// album in composer order: one album title, one artist, contiguous track
+/// numbers from 1, a plain disc number, and the same embedded art on every file.
 /// </summary>
 public sealed class ReadinessChecker
 {
@@ -193,20 +193,27 @@ public sealed class ReadinessChecker
                 issues.Add(new(ReadinessSeverity.Warning,
                     $"Track {n} title still begins with a track number: \"{file.Title}\".", n));
 
+            var expectedAlbum = YouTubeMusicTags.Normalize(project.AlbumTitle);
+            var expectedArtist = YouTubeMusicTags.Normalize(project.AlbumArtist);
+
             if (string.IsNullOrWhiteSpace(file.Album))
                 issues.Add(new(ReadinessSeverity.Error, $"Track {n} has no album tag.", n));
-            else if (!string.Equals(file.Album, project.AlbumTitle, StringComparison.Ordinal))
+            else if (!string.Equals(file.Album, expectedAlbum, StringComparison.Ordinal))
                 issues.Add(new(ReadinessSeverity.Error,
                     $"Track {n} has a different album tag (\"{file.Album}\") from the rest of the set.", n));
 
             if (string.IsNullOrWhiteSpace(file.AlbumArtist))
                 issues.Add(new(ReadinessSeverity.Error, $"Track {n} has no album artist tag.", n));
-            else if (!string.Equals(file.AlbumArtist, project.AlbumArtist, StringComparison.Ordinal))
+            else if (!string.Equals(file.AlbumArtist, expectedArtist, StringComparison.Ordinal))
                 issues.Add(new(ReadinessSeverity.Error,
                     $"Track {n} has a different album artist (\"{file.AlbumArtist}\") from the rest of the set.", n));
 
             if (string.IsNullOrWhiteSpace(file.Artist))
-                issues.Add(new(ReadinessSeverity.Warning, $"Track {n} has no artist tag.", n));
+                issues.Add(new(ReadinessSeverity.Error, $"Track {n} has no artist tag.", n));
+            else if (!string.Equals(file.Artist, expectedArtist, StringComparison.Ordinal))
+                issues.Add(new(ReadinessSeverity.Error,
+                    $"Track {n} artist is \"{file.Artist}\" instead of \"{expectedArtist}\". " +
+                    "A different artist splits the album in YouTube Music.", n));
 
             if (file.TrackNumber is null or <= 0)
                 issues.Add(new(ReadinessSeverity.Error, $"Track {n} has no track number tag.", n));
@@ -214,18 +221,53 @@ public sealed class ReadinessChecker
                 issues.Add(new(ReadinessSeverity.Error,
                     $"Track {n} is tagged as track {file.TrackNumber}; flattening did not reach this file.", n));
 
-            // A disc number above 1 means the file still claims to be part of a
-            // multi-disc set, which is exactly what flattening exists to remove.
-            if (file.DiscNumber is > 1)
+            if (file.TrackTotal is > 0 && file.TrackTotal != project.TotalTrackCount)
                 issues.Add(new(ReadinessSeverity.Error,
-                    $"Track {n} is still tagged as disc {file.DiscNumber}; it should be disc 1 of 1.", n));
+                    $"Track {n} says there are {file.TrackTotal} tracks, not {project.TotalTrackCount}.", n));
 
-            if (file.DiscTotal is > 1)
+            // Plain disc number of the disc it was ripped from. "2/3" in this
+            // field is the form reported to mis-sort; ATL hides the slash when
+            // it parses, so the raw comment is checked too.
+            if (file.DiscNumber is null or <= 0)
+                issues.Add(new(ReadinessSeverity.Error, $"Track {n} has no disc number.", n));
+            else if (file.DiscNumber != track.SourceDiscNumber)
                 issues.Add(new(ReadinessSeverity.Error,
-                    $"Track {n} still reports a disc total of {file.DiscTotal}; it should be 1.", n));
+                    $"Track {n} is tagged as disc {file.DiscNumber} but it was ripped from disc {track.SourceDiscNumber}.", n));
+
+            var comments = VorbisComments.TryRead(track.FilePath!);
+            if (comments is not null)
+            {
+                foreach (var discValue in comments.Values("DISCNUMBER"))
+                {
+                    if (YouTubeMusicTags.IsCombinedPosition(discValue))
+                        issues.Add(new(ReadinessSeverity.Error,
+                            $"Track {n} disc number is \"{discValue}\". YouTube Music mis-sorts a disc written as n/n; it has to be a plain number.", n));
+                }
+
+                foreach (var trackValue in comments.Values("TRACKNUMBER"))
+                {
+                    if (YouTubeMusicTags.IsCombinedPosition(trackValue))
+                        issues.Add(new(ReadinessSeverity.Error,
+                            $"Track {n} track number is \"{trackValue}\" instead of a plain number.", n));
+                }
+            }
 
             if (file.EmbeddedPictures.Count == 0)
                 issues.Add(new(ReadinessSeverity.Error, $"Track {n} has no embedded cover art.", n));
+            else if (project.CoverArt is { Length: > 0 }
+                     && !file.EmbeddedPictures[0].PictureData.AsSpan().SequenceEqual(project.CoverArt))
+                issues.Add(new(ReadinessSeverity.Error,
+                    $"Track {n} has different cover art from the rest of the album.", n));
+
+            if (track.CheckedAgainstDisc && track.Confidence == RipConfidence.Unstable)
+                issues.Add(new(ReadinessSeverity.Error,
+                    $"Track {n} \"{track.Title}\" read differently the second time. Re-rip this disc.", n));
+            else if (track.CheckedAgainstDisc && track.Confidence == RipConfidence.Unverified)
+                issues.Add(new(ReadinessSeverity.Warning,
+                    $"Track {n} was not confirmed by a second read or by AccurateRip.", n));
+            else if (track.AccurateRipDisagreed && track.Confidence == RipConfidence.Repeatable)
+                issues.Add(new(ReadinessSeverity.Warning,
+                    $"Track {n} reads consistently but does not match AccurateRip. The drive offset may be off by a few samples.", n));
 
             // A FLAC that decodes to nothing is a truncated or failed rip.
             //

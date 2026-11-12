@@ -252,13 +252,18 @@
 
                         <StackPanel Grid.Row="0">
                             <TextBlock Text="Identify release" Style="{StaticResource PanelTitleText}" />
-                            <TextBlock Style="{StaticResource BodyText}" Margin="0,8,0,0"
-                                       Text="Matches marked VERIFIED have a track count that agrees with this disc. An expanded edition shares its title with the original album, so an unverified match may well be the wrong release." />
+                            <TextBlock Style="{StaticResource BodyText}" Margin="0,8,0,0" TextWrapping="Wrap"
+                                       Text="A DISC ID or DURATIONS match was checked against this disc. Two discs with the same number of tracks are not treated as the same disc. The album title and artist lock on the first rip so the set stays one album." />
                         </StackPanel>
 
                         <Grid Grid.Row="1" Margin="0,18,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBox x:Name="SearchBox" Style="{StaticResource PanelTextBox}"
@@ -267,6 +272,16 @@
                                     Style="{StaticResource BrassButton}"
                                     Margin="10,0,0,0" MinWidth="0" Padding="16,8"
                                     Click="SearchButton_Click" />
+                            <Button Grid.Column="2" x:Name="RepairButton" Content="Repair tags"
+                                    Style="{StaticResource BrassButton}"
+                                    Margin="10,0,0,0" MinWidth="0" Padding="16,8"
+                                    Click="RepairButton_Click" />
+                            <CheckBox x:Name="ShowAllMatchesCheck" Grid.Row="1" Grid.ColumnSpan="3"
+                                      Style="{StaticResource PanelCheckBox}"
+                                      Content="Show all results"
+                                      Margin="0,10,0,0"
+                                      Visibility="Collapsed"
+                                      Checked="ShowAllMatches_Changed" Unchecked="ShowAllMatches_Changed" />
                         </Grid>
 
                         <Border Grid.Row="2" Style="{StaticResource RecessedPanel}" Margin="0,14,0,0" Padding="4">
@@ -276,7 +291,7 @@
                                       SelectionChanged="MatchList_SelectionChanged">
                                 <ListView.View>
                                     <GridView ColumnHeaderContainerStyle="{StaticResource PanelGridViewHeader}">
-                                        <GridViewColumn Header="Status" Width="92"
+                                        <GridViewColumn Header="Status" Width="110"
                                                         DisplayMemberBinding="{Binding StatusText}" />
                                         <GridViewColumn Header="Release" Width="330"
                                                         DisplayMemberBinding="{Binding Title}" />
@@ -300,7 +315,9 @@
                                 <ColumnDefinition Width="12" />
                                 <ColumnDefinition Width="1.4*" />
                                 <ColumnDefinition Width="12" />
-                                <ColumnDefinition Width="70" />
+                                <ColumnDefinition Width="64" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="56" />
                                 <ColumnDefinition Width="12" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
@@ -312,12 +329,14 @@
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="Album title" Style="{StaticResource PlateLabelText}" Margin="0,0,0,6" />
                             <TextBlock Grid.Row="0" Grid.Column="2" Text="Album artist" Style="{StaticResource PlateLabelText}" Margin="0,0,0,6" />
                             <TextBlock Grid.Row="0" Grid.Column="4" Text="Year" Style="{StaticResource PlateLabelText}" Margin="0,0,0,6" />
+                            <TextBlock Grid.Row="0" Grid.Column="6" Text="Disc" Style="{StaticResource PlateLabelText}" Margin="0,0,0,6" />
 
                             <TextBox Grid.Row="1" Grid.Column="0" x:Name="AlbumTitleBox" Style="{StaticResource PanelTextBox}" />
                             <TextBox Grid.Row="1" Grid.Column="2" x:Name="AlbumArtistBox" Style="{StaticResource PanelTextBox}" />
                             <TextBox Grid.Row="1" Grid.Column="4" x:Name="YearBox" Style="{StaticResource PanelTextBox}" />
+                            <TextBox Grid.Row="1" Grid.Column="6" x:Name="DiscBox" Style="{StaticResource PanelTextBox}" />
 
-                            <Button Grid.Row="1" Grid.Column="6" x:Name="StartRipButton" Content="Start Rip"
+                            <Button Grid.Row="1" Grid.Column="8" x:Name="StartRipButton" Content="Start Rip"
                                     Style="{StaticResource AmberButton}"
                                     Click="StartRipButton_Click" />
                         </Grid>
@@ -335,7 +354,7 @@
                         <StackPanel Grid.Row="0">
                             <TextBlock x:Name="RipHeadingText" Text="Ripping disc 1" Style="{StaticResource PanelTitleText}" />
                             <TextBlock x:Name="RipSubText" Style="{StaticResource BodyText}" Margin="0,8,0,0"
-                                       Text="Reading audio with offset correction and re-reads on damaged sectors. Encoding straight to FLAC." />
+                                       Text="Offset-corrected read, straight to FLAC. AccurateRip when the pressing is known; otherwise the disc is read a second time." />
                         </StackPanel>
 
                         <StackPanel Grid.Row="1" Margin="0,22,0,0">
@@ -365,10 +384,14 @@
                             <Button x:Name="CancelRipButton" Content="Cancel"
                                     Style="{StaticResource BrassButton}" Margin="0,0,10,0"
                                     Click="CancelRipButton_Click" />
-                            <Button x:Name="NextDiscButton" Content="Rip Another Disc"
+                            <Button x:Name="NextDiscButton" Content="Insert next disc"
                                     Style="{StaticResource BrassButton}" Margin="0,0,10,0"
                                     Visibility="Collapsed"
                                     Click="NextDiscButton_Click" />
+                            <Button x:Name="RepairRippedButton" Content="Repair tags"
+                                    Style="{StaticResource BrassButton}" Margin="0,0,10,0"
+                                    Visibility="Collapsed"
+                                    Click="RepairButton_Click" />
                             <Button x:Name="ToArtworkButton" Content="Continue to Artwork"
                                     Style="{StaticResource AmberButton}"
                                     Visibility="Collapsed"

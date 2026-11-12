@@ -1,0 +1,39 @@
+<local:PanelWindow x:Class="ClaudeSoundtrack.App.Dialogs.RepairAlbumWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:ClaudeSoundtrack.App"
+        Title="Repair album tags"
+        CaptionHeight="56"
+        Height="520" Width="720"
+        MinHeight="420" MinWidth="560"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WorkshopBrush}"
+        FontFamily="{StaticResource BodyFont}">
+
+  <Border Style="{StaticResource ChassisEdge}">
+    <Grid Margin="14">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <Border Grid.Row="0" Style="{StaticResource RivetedPanel}" Padding="20,12">
+        <TextBlock Text="Repair album tags" Style="{StaticResource PanelTitleText}" />
+      </Border>
+
+      <Border Grid.Row="1" Style="{StaticResource RecessedPanel}" Margin="0,14,0,0" Padding="16">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <TextBlock x:Name="PreviewText" Style="{StaticResource BodyText}" TextWrapping="Wrap" />
+        </ScrollViewer>
+      </Border>
+
+      <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+        <Button Content="Cancel" Style="{StaticResource BrassButton}" Margin="0,0,10,0"
+                IsCancel="True" Click="CancelButton_Click" />
+        <Button x:Name="ConfirmButton" Content="Update the files" Style="{StaticResource AmberButton}"
+                IsDefault="True" Click="ConfirmButton_Click" />
+      </StackPanel>
+    </Grid>
+  </Border>
+</local:PanelWindow>

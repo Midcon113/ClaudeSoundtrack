@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ClaudeSoundtrack.Core.Models;
 
 namespace ClaudeSoundtrack.Core.Services;
 
@@ -21,11 +22,26 @@ namespace ClaudeSoundtrack.Core.Services;
 public sealed class DiscogsClient
 {
     private const string BaseUrl = "https://api.discogs.com";
+
+    /// <summary>
+    /// Unauthenticated callers are limited to 25 requests a minute. A burst of
+    /// release fetches is what made a lookup sometimes come back empty.
+    /// </summary>
+    private static readonly SemaphoreSlim Gate = new(1, 1);
+    private static DateTimeOffset _nextRequest = DateTimeOffset.MinValue;
+
     private readonly HttpClient _http;
 
     public DiscogsClient(HttpClient http)
     {
         _http = http;
+    }
+
+    /// <summary>Parses one release JSON document. Used by tests and by <see cref="GetReleaseAsync"/>.</summary>
+    public static ReleaseMatch? ParseReleaseJson(string json, string releaseId)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return ParseRelease(doc.RootElement, releaseId);
     }
 
     /// <summary>
@@ -54,7 +70,7 @@ public sealed class DiscogsClient
         List<string> ids;
         try
         {
-            using var response = await _http.GetAsync(url, cancellationToken).ConfigureAwait(false);
+            using var response = await SendAsync(url, cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode) return [];
 
             using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
@@ -97,8 +113,7 @@ public sealed class DiscogsClient
     {
         try
         {
-            using var response = await _http
-                .GetAsync($"{BaseUrl}/releases/{Uri.EscapeDataString(releaseId)}", cancellationToken)
+            using var response = await SendAsync($"{BaseUrl}/releases/{Uri.EscapeDataString(releaseId)}", cancellationToken)
                 .ConfigureAwait(false);
 
             if (!response.IsSuccessStatusCode) return null;
@@ -122,8 +137,7 @@ public sealed class DiscogsClient
     {
         try
         {
-            using var response = await _http
-                .GetAsync($"{BaseUrl}/releases/{Uri.EscapeDataString(releaseId)}", cancellationToken)
+            using var response = await SendAsync($"{BaseUrl}/releases/{Uri.EscapeDataString(releaseId)}", cancellationToken)
                 .ConfigureAwait(false);
 
             if (!response.IsSuccessStatusCode) return [];
@@ -196,6 +210,7 @@ public sealed class DiscogsClient
         // Keyed by the disc part of the position string, in first-seen order, so
         // a set listed as "CD1"/"CD2" groups the same way as one listed "1"/"2".
         var byDisc = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var lengthsByDisc = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
         var discOrder = new List<string>();
 
         if (root.TryGetProperty("tracklist", out var tracklist) && tracklist.ValueKind == JsonValueKind.Array)
@@ -213,6 +228,7 @@ public sealed class DiscogsClient
                 if (string.IsNullOrWhiteSpace(trackTitle)) continue;
 
                 titles.Add(trackTitle);
+                var lengthMs = ParseDurationMs(GetString(entry, "duration"));
 
                 // "2-14" and "CD2-14" both mean disc 2; a bare "14" means the
                 // release is single-disc and everything lands in one bucket.
@@ -223,10 +239,12 @@ public sealed class DiscogsClient
                 {
                     list = new List<string>();
                     byDisc[discKey] = list;
+                    lengthsByDisc[discKey] = new List<int>();
                     discOrder.Add(discKey);
                 }
 
                 list.Add(trackTitle);
+                lengthsByDisc[discKey].Add(lengthMs);
             }
         }
 
@@ -243,6 +261,14 @@ public sealed class DiscogsClient
 
         var tracksByDisc = orderedKeys.Select(k => (IReadOnlyList<string>)byDisc[k]).ToList();
         var discCount = tracksByDisc.Count == 0 ? 1 : tracksByDisc.Count;
+        var media = new List<DiscMedium>();
+        for (var i = 0; i < orderedKeys.Count; i++)
+        {
+            var key = orderedKeys[i];
+            var digits = new string(key.Where(char.IsDigit).ToArray());
+            var number = int.TryParse(digits, out var n) && n > 0 ? n : i + 1;
+            media.Add(new DiscMedium(number, byDisc[key], lengthsByDisc[key], DiscId: null));
+        }
 
         return new ReleaseMatch(
             Source: "Discogs",
@@ -250,7 +276,7 @@ public sealed class DiscogsClient
             Artist: artist,
             Year: year,
             TrackTitles: titles,
-            DiscNumber: 1,
+            DiscNumber: 0,
             DiscCount: discCount,
             Label: label,
             CatalogNumber: catalogNumber,
@@ -258,8 +284,63 @@ public sealed class DiscogsClient
             // Text search only. The TOC check in MetadataLookupService decides.
             IsTocVerified: false)
         {
-            TracksByDisc = tracksByDisc
+            TracksByDisc = tracksByDisc,
+            Media = media
         };
+    }
+
+    /// <summary>"3:45" and "1:02:03" become milliseconds. Anything else is unknown.</summary>
+    public static int ParseDurationMs(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return 0;
+        var parts = text.Trim().Split(':');
+        if (parts.Length is < 2 or > 3) return 0;
+        if (!parts.All(p => int.TryParse(p, out _))) return 0;
+
+        var seconds = 0;
+        foreach (var part in parts)
+        {
+            seconds = seconds * 60 + int.Parse(part, System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return seconds * 1000;
+    }
+
+    /// <summary>
+    /// Sends one Discogs request under the shared rate limit, and retries once
+    /// when Discogs answers 429. Image and metadata calls share the gate so a
+    /// cover search cannot trip the limit the lookup just stayed under.
+    /// </summary>
+    private async Task<HttpResponseMessage> SendAsync(string url, CancellationToken cancellationToken)
+    {
+        await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await SendLimitedAsync(url, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Gate.Release();
+        }
+    }
+
+    private async Task<HttpResponseMessage> SendLimitedAsync(string url, CancellationToken cancellationToken)
+    {
+        var wait = _nextRequest - DateTimeOffset.UtcNow;
+        if (wait > TimeSpan.Zero)
+            await Task.Delay(wait, cancellationToken).ConfigureAwait(false);
+
+        _nextRequest = DateTimeOffset.UtcNow.AddMilliseconds(1200);
+        var response = await _http.GetAsync(url, cancellationToken).ConfigureAwait(false);
+        if ((int)response.StatusCode != 429) return response;
+
+        var retry = TimeSpan.FromSeconds(5);
+        if (response.Headers.RetryAfter?.Delta is { } delta && delta > TimeSpan.Zero && delta < TimeSpan.FromSeconds(30))
+            retry = delta;
+        response.Dispose();
+        await Task.Delay(retry, cancellationToken).ConfigureAwait(false);
+        _nextRequest = DateTimeOffset.UtcNow.AddMilliseconds(1200);
+        return await _http.GetAsync(url, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

@@ -38,8 +38,22 @@ public static class FileNaming
         @"^\s*\(?\d{1,2}[-.]\d{1,3}\)?\s*(?:[-\u2013\u2014._:)\]]\s*|\s+)",
         RegexOptions.Compiled);
 
-    /// <summary>Characters Windows will not accept in a file name.</summary>
-    private static readonly char[] InvalidFileNameChars = Path.GetInvalidFileNameChars();
+    /// <summary>
+    /// Characters Windows will not accept in a file name.
+    ///
+    /// Taken as a fixed set rather than <see cref="Path.GetInvalidFileNameChars"/>,
+    /// which on Linux does not include the characters Windows rejects. The files
+    /// are written for a Windows machine either way.
+    /// </summary>
+    private static readonly HashSet<char> InvalidFileNameChars = CreateInvalidFileNameChars();
+
+    private static HashSet<char> CreateInvalidFileNameChars()
+    {
+        var chars = new HashSet<char>(Path.GetInvalidFileNameChars());
+        foreach (var c in "<>:\"/\\|?*") chars.Add(c);
+        for (var c = 0; c < 32; c++) chars.Add((char)c);
+        return chars;
+    }
 
     /// <summary>
     /// Device names Windows reserves. A track legitimately called "Aux" or "Con"
@@ -93,7 +107,7 @@ public static class FileNaming
         var sb = new StringBuilder(name.Length);
         foreach (var c in name)
         {
-            if (Array.IndexOf(InvalidFileNameChars, c) >= 0)
+            if (InvalidFileNameChars.Contains(c))
             {
                 // Substitute rather than drop, so the name stays readable.
                 sb.Append(c switch

@@ -60,8 +60,28 @@ public sealed class SoundtrackTrack
     /// </summary>
     public bool IsSilent { get; set; }
 
-    /// <summary>AccurateRip v1 CRC, when the rip produced one. Informational only.</summary>
+    /// <summary>AccurateRip v1 checksum of the offset-corrected audio, when computed.</summary>
     public uint? AccurateRipCrc { get; set; }
+
+    /// <summary>AccurateRip v2 checksum of the same audio.</summary>
+    public uint? AccurateRipV2Crc { get; set; }
+
+    /// <summary>
+    /// How far this track's audio was checked. The ripper sets
+    /// <see cref="CheckedAgainstDisc"/> once a disc read actually happened;
+    /// sample files leave it false so a tag-only dry run is not scolded for
+    /// having no second read.
+    /// </summary>
+    public bool CheckedAgainstDisc { get; set; }
+
+    /// <summary>Outcome of AccurateRip and the second read, when <see cref="CheckedAgainstDisc"/>.</summary>
+    public RipConfidence Confidence { get; set; }
+
+    /// <summary>
+    /// True when the audio is a stable read but does not match the AccurateRip
+    /// record for this pressing. Usually a drive-offset miss, not a random error.
+    /// </summary>
+    public bool AccurateRipDisagreed { get; set; }
 
     public override string ToString() => $"{FlatTrackNumber:D2}. {Title}";
 }
